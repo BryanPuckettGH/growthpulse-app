@@ -56,6 +56,7 @@ export function AppProvider({ children }) {
   });
   const [selectedDeviceId, setSelectedDeviceId] = useState(() => load('selectedDeviceId', STARTER_DEVICES[0].id));
   const [alarmRules, setAlarmRules] = useState(() => load('alarmRules', DEFAULT_ALARMS));
+  const [settings, setSettings] = useState(() => load('settings', { units: 'F', refreshMs: 2000, theme: 'auto' }));
 
   // Live simulation: advance every device's reading every 2 seconds.
   useEffect(() => {
@@ -66,14 +67,15 @@ export function AppProvider({ children }) {
           return { ...d, reading: r, history: [...d.history, r].slice(-60), lastSeen: r.time };
         })
       );
-    }, 2000);
+    }, settings.refreshMs);
     return () => clearInterval(id);
-  }, []);
+  }, [settings.refreshMs]);
 
   // Persist settings whenever they change, so nothing resets on refresh.
   useEffect(() => save('user', user), [user]);
   useEffect(() => save('alarmRules', alarmRules), [alarmRules]);
   useEffect(() => save('selectedDeviceId', selectedDeviceId), [selectedDeviceId]);
+  useEffect(() => save('settings', settings), [settings]);
   const deviceSig = devices.map((d) => `${d.id}|${d.name}|${d.location}|${d.transport}`).join(',');
   useEffect(() => {
     save('devices', devices.map((d) => ({ id: d.id, name: d.name, location: d.location, transport: d.transport })));
@@ -101,12 +103,15 @@ export function AppProvider({ children }) {
     setAlarmRules((rs) => rs.filter((r) => r.id !== id));
   }, []);
 
+  const updateSettings = useCallback((patch) => setSettings((s) => ({ ...s, ...patch })), []);
+
   const selectedDevice = devices.find((d) => d.id === selectedDeviceId) || devices[0];
 
   const value = {
     user, login, logout,
     devices, selectedDevice, selectedDeviceId, setSelectedDeviceId, addDevice,
     alarmRules, addAlarmRule, updateAlarmRule, removeAlarmRule,
+    settings, updateSettings,
   };
 
   return <AppCtx.Provider value={value}>{children}</AppCtx.Provider>;

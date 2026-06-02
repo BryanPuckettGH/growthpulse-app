@@ -24,10 +24,10 @@ export default function Chart({ series, color }) {
             <stop offset="100%" stopColor={color} stopOpacity={0.02} />
           </linearGradient>
         </defs>
-        <CartesianGrid vertical={false} stroke="#f0f1f3" />
-        <XAxis dataKey="t" tick={{ fontSize: 10, fill: '#9aa1aa' }} interval="preserveStartEnd" minTickGap={40} axisLine={false} tickLine={false} />
-        <YAxis tick={{ fontSize: 10, fill: '#9aa1aa' }} width={34} axisLine={false} tickLine={false} domain={['dataMin - 2', 'dataMax + 2']} />
-        <Tooltip contentStyle={{ borderRadius: 12, border: '1px solid #e9ebee', fontSize: 12, boxShadow: '0 8px 24px rgba(16,24,40,0.1)' }} />
+        <CartesianGrid vertical={false} stroke="var(--line)" />
+        <XAxis dataKey="t" tick={{ fontSize: 10, fill: 'var(--ink-3)' }} interval="preserveStartEnd" minTickGap={40} axisLine={false} tickLine={false} />
+        <YAxis tick={{ fontSize: 10, fill: 'var(--ink-3)' }} width={34} axisLine={false} tickLine={false} domain={['dataMin - 2', 'dataMax + 2']} />
+        <Tooltip contentStyle={{ borderRadius: 12, background: 'var(--card)', color: 'var(--ink)', border: '1px solid var(--line)', fontSize: 12, boxShadow: '0 8px 24px rgba(16,24,40,0.1)' }} />
         <ReferenceLine y={max} stroke="#cfd3d8" strokeDasharray="4 4" />
         <ReferenceLine y={avg} stroke={color} strokeDasharray="5 5" strokeOpacity={0.55} />
         <Area type="monotone" dataKey="value" stroke={color} strokeWidth={2.4} fill={`url(#${gid})`} isAnimationActive={false} />

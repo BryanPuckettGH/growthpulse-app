@@ -82,7 +82,7 @@ export function Gauge({ value, size = 116, color = '#2ecc71', label = '' }) {
   return (
     <div className="gauge" style={{ width: size, height: size }}>
       <svg width={size} height={size}>
-        <circle cx={size / 2} cy={size / 2} r={r} stroke="#eef0f2" strokeWidth={stroke} fill="none" />
+        <circle cx={size / 2} cy={size / 2} r={r} stroke="var(--line)" strokeWidth={stroke} fill="none" />
         <circle
           cx={size / 2}
           cy={size / 2}

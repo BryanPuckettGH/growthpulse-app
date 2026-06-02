@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useApp } from '../store/AppContext';
 
-// Branded sign-in screen using the real GrowthPulse logo. In demo mode any
-// email works, or the user can tap straight through. Later: real Losant login.
+// Branded sign-in screen. The wordmark is composed from the icon + text so it
+// adapts to light and dark themes (the flat logo SVG has a fixed navy wordmark).
 export default function Login() {
   const { login } = useApp();
   const [email, setEmail] = useState('');
@@ -10,7 +10,11 @@ export default function Login() {
 
   return (
     <div className="login">
-      <img className="brand__img" src="/growthpulse-logo.svg" alt="GrowthPulse - Smart Plant Monitoring" />
+      <div className="brand">
+        <img className="brand__icon" src="/growthpulse-icon.svg" alt="" />
+        <div className="brand__word">Growth<span className="brand__word-accent">Pulse</span></div>
+        <div className="brand__tag">SMART PLANT MONITORING</div>
+      </div>
 
       <div className="card">
         <input className="input" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />

@@ -1,22 +1,34 @@
+import { useState } from 'react';
 import { useApp } from '../store/AppContext';
-import { METRICS, statusOf, healthScore, recommendations, TRANSPORTS } from '../store/helpers';
+import {
+  METRICS, statusOf, healthScore, recommendations, TRANSPORTS,
+  displayValue, displayUnit, trendOf,
+} from '../store/helpers';
 import { MetricIcon, TransportIcon, Gauge, statusColor } from '../components/UI';
-import { AlertTriangle, Info, CheckCircle2 } from 'lucide-react';
+import Chart from '../components/Chart';
+import { AlertTriangle, Info, CheckCircle2, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 
 const HERO = ['airTemperatureF', 'airHumidity', 'soilMoisturePercent'];
 const CHIPS = ['airTemperatureF', 'soilTemperatureF', 'airHumidity', 'soilMoisturePercent'];
 
+function TrendIcon({ trend }) {
+  if (trend === 'up') return <TrendingUp size={13} />;
+  if (trend === 'down') return <TrendingDown size={13} />;
+  return <Minus size={13} />;
+}
+
 export default function LiveView() {
-  const { selectedDevice } = useApp();
+  const { selectedDevice, settings } = useApp();
   const r = selectedDevice.reading;
+  const u = settings.units;
   const health = healthScore(r);
   const recs = recommendations(r);
   const t = TRANSPORTS[selectedDevice.transport];
   const healthColor = health >= 80 ? '#2ecc71' : health >= 55 ? '#f4a52b' : '#ef4444';
+  const [detailKey, setDetailKey] = useState(null);
 
   return (
     <div>
-      {/* Hero readouts */}
       <div className="card">
         <div className="hero">
           {HERO.map((k) => {
@@ -24,7 +36,7 @@ export default function LiveView() {
             return (
               <div className="hero__metric" key={k}>
                 <div className="hero__val" style={{ color: statusColor(statusOf(k, r[k])) }}>
-                  {r[k]}<span className="hero__unit">{m.unit}</span>
+                  {displayValue(k, r[k], u)}<span className="hero__unit">{displayUnit(m.unit, u)}</span>
                 </div>
                 <div className="hero__label">{m.label}</div>
               </div>
@@ -33,7 +45,6 @@ export default function LiveView() {
         </div>
       </div>
 
-      {/* Gauge + health score */}
       <div className="card">
         <div className="gaugewrap">
           <Gauge value={r.soilMoisturePercent} color={statusColor(statusOf('soilMoisturePercent', r.soilMoisturePercent))} label="Moisture" />
@@ -51,25 +62,25 @@ export default function LiveView() {
         </div>
       </div>
 
-      {/* Sensor chips */}
       <div className="section-title">Sensors</div>
       <div className="chips">
         {CHIPS.map((k) => {
           const m = METRICS[k];
           const c = statusColor(statusOf(k, r[k]));
+          const trend = trendOf(selectedDevice.history, k);
           return (
-            <div className="chip" key={k}>
+            <button className="chip chip--tap" key={k} onClick={() => setDetailKey(k)}>
               <div className="chip__icon" style={{ background: c + '1a' }}><MetricIcon name={m.icon} color={c} /></div>
               <div className="chip__txt">
                 <div className="chip__label">{m.short}</div>
-                <div className="chip__val">{r[k]}<span className="chip__unit">{m.unit}</span></div>
+                <div className="chip__val">{displayValue(k, r[k], u)}<span className="chip__unit">{displayUnit(m.unit, u)}</span></div>
               </div>
-            </div>
+              <span className={`trend trend--${trend}`}><TrendIcon trend={trend} /></span>
+            </button>
           );
         })}
       </div>
 
-      {/* Smart insights */}
       <div className="section-title">Insights</div>
       <div className="card tight">
         {recs.map((rec, i) => {
@@ -82,6 +93,42 @@ export default function LiveView() {
             </div>
           );
         })}
+      </div>
+
+      {detailKey && (
+        <MetricDetail metricKey={detailKey} device={selectedDevice} units={u} onClose={() => setDetailKey(null)} />
+      )}
+    </div>
+  );
+}
+
+function MetricDetail({ metricKey, device, units, onClose }) {
+  const m = METRICS[metricKey];
+  const points = device.history.map((h) => ({
+    t: new Date(h.time).toLocaleTimeString([], { minute: '2-digit', second: '2-digit' }),
+    value: displayValue(metricKey, h[metricKey], units),
+  }));
+  const vals = points.map((p) => p.value);
+  const min = Math.min(...vals);
+  const max = Math.max(...vals);
+  const avg = Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10;
+  const c = statusColor(statusOf(metricKey, device.reading[metricKey]));
+  const unit = displayUnit(m.unit, units);
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="sheet__grab" />
+        <h2>{m.label}</h2>
+        <div className="hero__val" style={{ color: c, marginBottom: 6 }}>
+          {displayValue(metricKey, device.reading[metricKey], units)}<span className="hero__unit">{unit}</span>
+        </div>
+        <div className="chart__stats" style={{ marginBottom: 10 }}>
+          <span>Max <b>{max}{unit}</b></span>
+          <span>Avg <b>{avg}{unit}</b></span>
+          <span>Min <b>{min}{unit}</b></span>
+        </div>
+        <Chart series={{ points, min, max, avg }} color={m.color} />
       </div>
     </div>
   );

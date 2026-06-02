@@ -142,3 +142,24 @@ export const TRANSPORTS = {
   lorawan: { label: 'LoRaWAN', icon: 'lora', color: '#a06bff' },
   ethernet: { label: 'Ethernet', icon: 'ethernet', color: '#22a06b' },
 };
+
+// --- display helpers for units and trends ---
+const TEMP_KEYS = ['airTemperatureF', 'soilTemperatureF'];
+
+export function convertTemp(valueF, units) {
+  return units === 'C' ? Math.round((((valueF - 32) * 5) / 9) * 10) / 10 : valueF;
+}
+export function displayValue(key, value, units) {
+  return TEMP_KEYS.includes(key) ? convertTemp(value, units) : value;
+}
+export function displayUnit(metricUnit, units) {
+  return metricUnit === '°F' && units === 'C' ? '°C' : metricUnit;
+}
+export function trendOf(history, key) {
+  if (!history || history.length < 2) return 'flat';
+  const prev = history[history.length - 2][key];
+  const curr = history[history.length - 1][key];
+  if (curr > prev) return 'up';
+  if (curr < prev) return 'down';
+  return 'flat';
+}

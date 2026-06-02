@@ -1,24 +1,45 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { AppProvider, useApp } from './store/AppContext';
 import Login from './components/Login';
 import LiveView from './views/LiveView';
 import HistoryView from './views/HistoryView';
 import AlarmsView from './views/AlarmsView';
 import DevicesView from './views/DevicesView';
+import SettingsView from './views/SettingsView';
 import { activeAlerts } from './store/helpers';
-import { Activity, LineChart, Bell, LayoutGrid, ChevronDown } from 'lucide-react';
+import { Activity, LineChart, Bell, LayoutGrid, Settings, ChevronDown } from 'lucide-react';
 
 const TABS = [
   { id: 'live', label: 'Live', icon: Activity, View: LiveView },
   { id: 'history', label: 'History', icon: LineChart, View: HistoryView },
   { id: 'alarms', label: 'Alarms', icon: Bell, View: AlarmsView },
   { id: 'devices', label: 'Devices', icon: LayoutGrid, View: DevicesView },
+  { id: 'settings', label: 'Settings', icon: Settings, View: SettingsView },
 ];
 
+// Apply the chosen theme (light / dark / auto) to the root element.
+function useTheme(theme) {
+  useEffect(() => {
+    const root = document.documentElement;
+    const apply = () => {
+      const resolved = theme === 'auto'
+        ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+        : theme;
+      root.setAttribute('data-theme', resolved);
+    };
+    apply();
+    if (theme === 'auto') {
+      const mq = window.matchMedia('(prefers-color-scheme: dark)');
+      mq.addEventListener('change', apply);
+      return () => mq.removeEventListener('change', apply);
+    }
+  }, [theme]);
+}
+
 function Shell() {
-  const { user, logout, selectedDevice, devices, alarmRules } = useApp();
+  const { user, selectedDevice, devices, alarmRules, settings } = useApp();
   const [tab, setTab] = useState('live');
-  const [accountOpen, setAccountOpen] = useState(false);
+  useTheme(settings.theme);
 
   if (!user) return <Login />;
 
@@ -35,17 +56,20 @@ function Shell() {
           </div>
           <div className="appbar__sub">{selectedDevice.location}</div>
         </div>
-        <button className="iconbtn avatar" title="Account" onClick={() => setAccountOpen(true)}>
+        <button className="iconbtn avatar" title="Account" onClick={() => setTab('settings')}>
           {user.name.charAt(0).toUpperCase()}
         </button>
       </div>
 
-      <div className="content">
+      <div className="content fade-in" key={tab}>
         <ActiveView />
       </div>
 
       <div className="tabbar">
-        <div className="tabbar__brand"><img className="brandmark-img" src="/growthpulse-icon.svg" alt="" /><span className="brandword">Growth<span className="brandword__accent">Pulse</span></span></div>
+        <div className="tabbar__brand">
+          <img className="brandmark-img" src="/growthpulse-icon.svg" alt="" />
+          <span className="brandword">Growth<span className="brandword__accent">Pulse</span></span>
+        </div>
         {TABS.map((t) => {
           const Icon = t.icon;
           return (
@@ -58,27 +82,6 @@ function Shell() {
             </button>
           );
         })}
-      </div>
-
-      {accountOpen && <AccountSheet user={user} onClose={() => setAccountOpen(false)} onLogout={logout} />}
-    </div>
-  );
-}
-
-function AccountSheet({ user, onClose, onLogout }) {
-  return (
-    <div className="overlay" onClick={onClose}>
-      <div className="sheet" onClick={(e) => e.stopPropagation()}>
-        <div className="sheet__grab" />
-        <h2>Account</h2>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18 }}>
-          <div className="avatar-lg">{user.name.charAt(0).toUpperCase()}</div>
-          <div>
-            <div style={{ fontWeight: 700 }}>{user.name}</div>
-            <div className="muted">{user.email}</div>
-          </div>
-        </div>
-        <button className="btn btn--ghost" onClick={onLogout}>Log out</button>
       </div>
     </div>
   );
