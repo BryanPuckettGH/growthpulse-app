@@ -6,7 +6,7 @@ import HistoryView from './views/HistoryView';
 import AlarmsView from './views/AlarmsView';
 import DevicesView from './views/DevicesView';
 import { activeAlerts } from './store/helpers';
-import { Activity, LineChart, Bell, LayoutGrid, ChevronDown, Settings } from 'lucide-react';
+import { Activity, LineChart, Bell, LayoutGrid, ChevronDown } from 'lucide-react';
 
 const TABS = [
   { id: 'live', label: 'Live', icon: Activity, View: LiveView },
@@ -16,8 +16,9 @@ const TABS = [
 ];
 
 function Shell() {
-  const { user, selectedDevice, devices, alarmRules } = useApp();
+  const { user, logout, selectedDevice, devices, alarmRules } = useApp();
   const [tab, setTab] = useState('live');
+  const [accountOpen, setAccountOpen] = useState(false);
 
   if (!user) return <Login />;
 
@@ -34,7 +35,9 @@ function Shell() {
           </div>
           <div className="appbar__sub">{selectedDevice.location}</div>
         </div>
-        <button className="iconbtn" title="Settings"><Settings size={18} /></button>
+        <button className="iconbtn avatar" title="Account" onClick={() => setAccountOpen(true)}>
+          {user.name.charAt(0).toUpperCase()}
+        </button>
       </div>
 
       <div className="content">
@@ -55,6 +58,27 @@ function Shell() {
             </button>
           );
         })}
+      </div>
+
+      {accountOpen && <AccountSheet user={user} onClose={() => setAccountOpen(false)} onLogout={logout} />}
+    </div>
+  );
+}
+
+function AccountSheet({ user, onClose, onLogout }) {
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="sheet__grab" />
+        <h2>Account</h2>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18 }}>
+          <div className="avatar-lg">{user.name.charAt(0).toUpperCase()}</div>
+          <div>
+            <div style={{ fontWeight: 700 }}>{user.name}</div>
+            <div className="muted">{user.email}</div>
+          </div>
+        </div>
+        <button className="btn btn--ghost" onClick={onLogout}>Log out</button>
       </div>
     </div>
   );
