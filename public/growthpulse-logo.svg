@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 200" width="600" height="200">
+  <defs>
+    <linearGradient id="leafGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#2ECC71;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1A9B5A;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="pulseGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#1A9B5A;stop-opacity:1" />
+      <stop offset="60%" style="stop-color:#2ECC71;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#27AE60;stop-opacity:0.6" />
+    </linearGradient>
+    <linearGradient id="stemGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#2ECC71;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1A9B5A;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+
+  <path d="M 60 155 Q 60 120 65 100 Q 68 85 62 70"
+        stroke="url(#stemGrad)" stroke-width="4" fill="none" stroke-linecap="round"/>
+
+  <path d="M 62 95 Q 38 72 30 55 Q 42 58 55 70 Q 58 74 60 82"
+        fill="url(#leafGrad)" opacity="0.85"/>
+
+  <path d="M 64 78 Q 85 48 100 35 Q 88 55 78 70 Q 72 78 65 82"
+        fill="url(#leafGrad)"/>
+
+  <path d="M 62 92 Q 48 76 36 62" stroke="#1A9B5A" stroke-width="0.8" fill="none" opacity="0.5"/>
+  <path d="M 64 78 Q 82 55 95 40" stroke="#1A9B5A" stroke-width="0.8" fill="none" opacity="0.5"/>
+
+  <path d="M 10 155 L 40 155 L 50 155 L 60 155 L 72 140 L 80 170 L 90 130 L 100 160 L 108 148 L 118 155 L 145 155"
+        stroke="url(#pulseGrad)" stroke-width="3.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <circle cx="145" cy="155" r="3" fill="#2ECC71" opacity="0.5"/>
+
+  <path d="M 145 155 L 160 155" stroke="#2ECC71" stroke-width="2" fill="none" opacity="0.3" stroke-linecap="round"/>
+
+  <text x="178" y="118" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif"
+        font-size="62" font-weight="700" fill="#2C3E50" letter-spacing="-1">Growth</text>
+
+  <text x="430" y="118" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif"
+        font-size="62" font-weight="300" fill="#2ECC71" letter-spacing="-1">Pulse</text>
+
+  <text x="180" y="148" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif"
+        font-size="16" font-weight="400" fill="#7F8C8D" letter-spacing="3">SMART PLANT MONITORING</text>
+</svg>

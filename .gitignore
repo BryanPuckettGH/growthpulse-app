@@ -1,0 +1,18 @@
+# Dependencies (huge folder, never commit it - anyone can recreate it with npm install)
+node_modules/
+
+# Build output
+dist/
+
+# Logs
+npm-debug.log*
+*.log
+
+# Editor / OS junk
+.DS_Store
+.vscode/
+
+# Secrets - keep API keys and credentials OUT of the repo
+.env
+.env.local
+src/secrets.js
