@@ -1,5 +1,5 @@
 import { useApp } from '../store/AppContext';
-import { Pills } from '../components/UI';
+import { Pills, Toggle } from '../components/UI';
 import { LogOut } from 'lucide-react';
 
 const REFRESH_OPTIONS = [
@@ -11,6 +11,8 @@ const REFRESH_OPTIONS = [
 
 export default function SettingsView() {
   const { settings, updateSettings, user, logout, tier, openPlans } = useApp();
+  const n = settings.notifications || { push: true, email: false, emailAddr: '', sms: false, phone: '' };
+  const setNotif = (patch) => updateSettings({ notifications: { ...n, ...patch } });
 
   return (
     <div>
@@ -55,6 +57,32 @@ export default function SettingsView() {
           <span className="muted">how often readings update</span>
         </div>
         <Pills options={REFRESH_OPTIONS} value={settings.refreshMs} onChange={(v) => updateSettings({ refreshMs: v })} blue />
+      </div>
+
+      <div className="section-title">Notifications</div>
+      <div className="card">
+        <p className="muted" style={{ marginTop: -2, marginBottom: 14 }}>How GrowthPulse alerts you when an alarm trips. These activate once your devices are connected to the cloud.</p>
+
+        <div className="field__row">
+          <div className="field__label">Push notifications</div>
+          <Toggle checked={n.push} onChange={(v) => setNotif({ push: v })} />
+        </div>
+
+        <div className="field__row" style={{ marginTop: 16 }}>
+          <div className="field__label">Email alerts</div>
+          <Toggle checked={n.email} onChange={(v) => setNotif({ email: v })} />
+        </div>
+        {n.email && (
+          <input className="input" type="email" placeholder="you@email.com" value={n.emailAddr} onChange={(e) => setNotif({ emailAddr: e.target.value })} style={{ marginTop: 6, marginBottom: 0 }} />
+        )}
+
+        <div className="field__row" style={{ marginTop: 16 }}>
+          <div className="field__label">SMS alerts</div>
+          <Toggle checked={n.sms} onChange={(v) => setNotif({ sms: v })} />
+        </div>
+        {n.sms && (
+          <input className="input" type="tel" placeholder="+1 555 123 4567" value={n.phone} onChange={(e) => setNotif({ phone: e.target.value })} style={{ marginTop: 6, marginBottom: 0 }} />
+        )}
       </div>
 
       <div className="section-title">Account</div>
