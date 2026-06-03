@@ -58,17 +58,19 @@ const DEFAULT_ALARMS = [
 ];
 
 export function AppProvider({ children }) {
-  const { user, logout } = useAuth();
+  const { user, logout, isDemo } = useAuth();
   STORAGE_PREFIX = user.id; // each account's data is namespaced by user id
   const [devices, setDevices] = useState(() => {
     const saved = load('devices', null);
-    const base = saved && saved.length ? saved : STARTER_DEVICES;
+    // Real accounts start empty (onboarding prompts to connect a device).
+    // Demo mode seeds sample devices so prospects can explore everything.
+    const base = saved && saved.length ? saved : (isDemo ? STARTER_DEVICES : []);
     return base.map(buildDevice);
   });
-  const [selectedDeviceId, setSelectedDeviceId] = useState(() => load('selectedDeviceId', STARTER_DEVICES[0].id));
+  const [selectedDeviceId, setSelectedDeviceId] = useState(() => load('selectedDeviceId', null));
   const [alarmRules, setAlarmRules] = useState(() => load('alarmRules', DEFAULT_ALARMS));
   const [settings, setSettings] = useState(() => load('settings', { units: 'F', refreshMs: 2000, theme: 'auto' }));
-  const [tierId, setTierId] = useState(() => load('tier', 'free'));
+  const [tierId, setTierId] = useState(() => load('tier', isDemo ? 'pro' : 'free'));
   const [showPlans, setShowPlans] = useState(false);
   const [journals, setJournals] = useState(() => load('journals', {}));
   const [weather, setWeather] = useState(null);

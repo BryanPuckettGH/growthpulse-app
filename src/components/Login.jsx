@@ -3,7 +3,7 @@ import { useAuth } from '../auth/AuthProvider';
 
 // Real sign-in / sign-up using Supabase auth.
 export default function Login() {
-  const { login, signup } = useAuth();
+  const { login, signup, startDemo } = useAuth();
   const [mode, setMode] = useState('login'); // 'login' | 'signup'
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -38,6 +38,8 @@ export default function Login() {
         <button className="btn btn--green" disabled={busy} onClick={submit}>
           {busy ? 'Please wait...' : mode === 'login' ? 'Sign in' : 'Create account'}
         </button>
+
+        <button className="btn btn--ghost" style={{ marginTop: 10 }} onClick={startDemo}>Explore the demo</button>
 
         <p className="muted center" style={{ marginTop: 14 }}>
           {mode === 'login' ? 'New to GrowthPulse? ' : 'Already have an account? '}

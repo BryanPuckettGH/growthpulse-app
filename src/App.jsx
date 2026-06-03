@@ -8,6 +8,7 @@ import AlarmsView from './views/AlarmsView';
 import DevicesView from './views/DevicesView';
 import SettingsView from './views/SettingsView';
 import PlansSheet from './components/PlansSheet';
+import Onboarding from './components/Onboarding';
 import { activeAlerts, METRICS } from './store/helpers';
 import { Activity, LineChart, Bell, LayoutGrid, Settings, ChevronDown } from 'lucide-react';
 
@@ -70,6 +71,8 @@ function Shell() {
     const t = setTimeout(() => setToast(null), 4000);
     return () => clearTimeout(t);
   }, [toast]);
+
+  if (devices.length === 0) return <Onboarding />;
 
   const ActiveView = TABS.find((t) => t.id === tab).View;
 
