@@ -33,8 +33,10 @@ export function AuthProvider({ children }) {
     return error ? error.message : null;
   }, []);
 
-  const signup = useCallback(async (email, password) => {
-    const { error } = await supabase.auth.signUp({ email, password });
+  // meta carries profile details (first/last name, grower type) into
+  // Supabase user metadata so the app can greet people properly.
+  const signup = useCallback(async (email, password, meta = {}) => {
+    const { error } = await supabase.auth.signUp({ email, password, options: { data: meta } });
     if (!error) setDemo(false);
     return error ? error.message : null;
   }, []);

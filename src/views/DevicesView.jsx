@@ -2,12 +2,13 @@ import { useState } from 'react';
 import { useApp } from '../store/AppContext';
 import { TRANSPORTS } from '../store/helpers';
 import { TransportIcon } from '../components/UI';
-import { Plus, Sprout, Lock, Pencil, Trash2 } from 'lucide-react';
+import { geocodePlace } from '../utils/geocode';
+import { Plus, Sprout, Lock, Pencil, Trash2, RefreshCcw, AlertTriangle, MapPin } from 'lucide-react';
 import AddDeviceSheet from '../components/AddDeviceSheet';
 import ClaimDeviceSheet from '../components/ClaimDeviceSheet';
 
-// List of all devices (tap to select) plus an add-device sheet that lets
-// you pick the connection type: Wi-Fi, LoRaWAN, or Ethernet.
+// List of all devices (tap to select) plus add/claim and full device
+// management: rename, home location, delete, and factory reset for resale.
 export default function DevicesView() {
   const { devices, selectedDeviceId, setSelectedDeviceId, addDevice, claimDevice, tier, openPlans, isDemo } = useApp();
   const [open, setOpen] = useState(false);
@@ -29,6 +30,7 @@ export default function DevicesView() {
               <div className="device__meta">
                 <span className="badge"><TransportIcon name={t.icon} color={t.color} />{t.label}</span>
                 <span><span className="dot" style={{ background: d.online ? '#2ecc71' : '#cfd3d8', marginRight: 5 }} />{d.online ? 'Online' : 'Offline'}</span>
+                {d.location && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><MapPin size={11} />{d.location}</span>}
               </div>
             </div>
             <div className="device__reading">
@@ -62,22 +64,72 @@ export default function DevicesView() {
 }
 
 function DeviceEditSheet({ device, onClose }) {
-  const { updateDevice, removeDevice, devices } = useApp();
+  const { updateDevice, removeDevice } = useApp();
   const [name, setName] = useState(device.name);
   const [location, setLocation] = useState(device.location);
   const [transport, setTransport] = useState(device.transport);
+  const [busy, setBusy] = useState(false);
+  const [confirm, setConfirm] = useState(null); // null | 'remove' | 'reset'
 
-  const save = () => { updateDevice(device.id, { name: name || device.name, location, transport }); onClose(); };
-  const del = () => { removeDevice(device.id); onClose(); };
+  const save = async () => {
+    setBusy(true);
+    let patch = { name: name.trim() || device.name, transport };
+    const loc = location.trim();
+    if (loc && loc !== device.location) {
+      // Re-pin the plant's home: geocode the new place for weather.
+      const geo = await geocodePlace(loc);
+      patch = geo ? { ...patch, location: geo.label, geo } : { ...patch, location: loc };
+    } else if (!loc) {
+      patch = { ...patch, location: '', geo: undefined };
+    }
+    updateDevice(device.id, patch);
+    setBusy(false);
+    onClose();
+  };
+
+  const destroy = () => { removeDevice(device.id); onClose(); };
+
+  // Confirmation step with the data-loss disclaimer.
+  if (confirm) {
+    const reset = confirm === 'reset';
+    return (
+      <div className="overlay" onClick={onClose}>
+        <div className="sheet" onClick={(e) => e.stopPropagation()}>
+          <div className="sheet__grab" />
+          <h2>{reset ? 'Factory reset for a new owner?' : 'Remove this device?'}</h2>
+          <div className="warnbox">
+            <AlertTriangle size={18} color="var(--red)" />
+            <div>
+              {reset ? (
+                <>This permanently deletes everything tied to <b>{device.name}</b> from your account: live history, journal photos, and alarms. The new owner sets it up fresh, they hold the PRG button for 3 seconds to clear your Wi-Fi, then pair it to their own account with the code on its screen. If you ever reconnect this unit, you'll be starting from scratch.</>
+              ) : (
+                <><b>{device.name}</b> will be removed from your account, and its history, journal photos, and alarms are deleted. The unit itself keeps working, you can pair it again any time with the code on its screen.</>
+              )}
+            </div>
+          </div>
+          <button className="btn btn--danger" onClick={destroy}>{reset ? 'Delete data & unpair' : 'Remove device'}</button>
+          <button className="btn btn--ghost" style={{ marginTop: 10 }} onClick={() => setConfirm(null)}>Cancel</button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="overlay" onClick={onClose}>
       <div className="sheet" onClick={(e) => e.stopPropagation()}>
         <div className="sheet__grab" />
         <h2>Edit device</h2>
+
+        <div className="fieldlabel">Plant name</div>
         <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Device name" />
-        <input className="input" value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Location" />
-        <div className="muted" style={{ margin: '4px 0 8px' }}>Connection</div>
+
+        <div className="fieldlabel">Plant's home location (city or ZIP)</div>
+        <input className="input" value={location} onChange={(e) => setLocation(e.target.value)} placeholder="e.g. Miami or 33199" />
+        <p className="muted" style={{ fontSize: 12, margin: '-6px 2px 10px' }}>
+          Weather and rain alerts use the plant's home, not your phone's location.
+        </p>
+
+        <div className="fieldlabel">Connection</div>
         <div className="choices">
           {Object.entries(TRANSPORTS).map(([key, t]) => (
             <div key={key} className={`choice ${transport === key ? 'active' : ''}`} onClick={() => setTransport(key)}>
@@ -86,14 +138,18 @@ function DeviceEditSheet({ device, onClose }) {
             </div>
           ))}
         </div>
-        <button className="btn btn--green" onClick={save}>Save changes</button>
-        {devices.length > 1 && (
-          <button className="btn btn--ghost" style={{ marginTop: 10, color: '#ef4444' }} onClick={del}>
-            <Trash2 size={15} style={{ verticalAlign: '-2px', marginRight: 6 }} />Delete device
+        <button className="btn btn--green" disabled={busy} onClick={save}>{busy ? 'Saving...' : 'Save changes'}</button>
+
+        <div className="danger">
+          <div className="fieldlabel" style={{ color: 'var(--red)' }}>Danger zone</div>
+          <button className="btn btn--ghost" style={{ color: 'var(--red)' }} onClick={() => setConfirm('remove')}>
+            <Trash2 size={15} style={{ verticalAlign: '-2px', marginRight: 6 }} />Remove from my account
           </button>
-        )}
+          <button className="btn btn--ghost" style={{ marginTop: 8, color: 'var(--red)' }} onClick={() => setConfirm('reset')}>
+            <RefreshCcw size={15} style={{ verticalAlign: '-2px', marginRight: 6 }} />Factory reset · selling or gifting
+          </button>
+        </div>
       </div>
     </div>
   );
 }
-

@@ -40,7 +40,9 @@ export default function WeatherCard() {
           <div style={{ fontSize: 22, fontWeight: 800 }}>
             {weather.temp}{unit} <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink-3)' }}>{cond}</span>
           </div>
-          <div className="device__meta"><MapPin size={12} /> {weather.label} · {weather.rainChance}% rain today</div>
+          <div className="device__meta">
+            <MapPin size={12} /> {weather.label}{weather.pinned ? ' (plant’s home)' : ''} · {weather.rainChance}% rain · high {weather.high}{unit}
+          </div>
         </div>
       </div>
       {rainy && (

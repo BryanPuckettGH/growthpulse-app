@@ -91,7 +91,12 @@ export default function SettingsView() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
           <div className="avatar-lg">{user.name.charAt(0).toUpperCase()}</div>
           <div>
-            <div style={{ fontWeight: 700 }}>{user.name}</div>
+            <div style={{ fontWeight: 700 }}>
+              {user.name}
+              {user.growerType && (
+                <span className="badge" style={{ marginLeft: 8, background: '#eafaf0', color: 'var(--green-d)' }}>{user.growerType}</span>
+              )}
+            </div>
             <div className="muted">{user.email}</div>
           </div>
         </div>

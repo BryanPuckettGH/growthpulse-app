@@ -1,24 +1,38 @@
 import { useState } from 'react';
 import { useAuth } from '../auth/AuthProvider';
 
-// Real sign-in / sign-up using Supabase auth.
+const ROLES = ['Hobbyist', 'Home grower', 'Farmer', 'Commercial'];
+
+// Real sign-in / sign-up using Supabase auth, plus a demo mode for prospects.
 export default function Login() {
   const { login, signup, startDemo } = useAuth();
   const [mode, setMode] = useState('login'); // 'login' | 'signup'
+  const [first, setFirst] = useState('');
+  const [last, setLast] = useState('');
+  const [role, setRole] = useState('Hobbyist');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
   const submit = async () => {
     if (!email || !password) { setError('Enter your email and password.'); return; }
+    if (mode === 'signup') {
+      if (!first.trim() || !last.trim()) { setError('Enter your first and last name.'); return; }
+      if (password.length < 6) { setError('Password needs at least 6 characters.'); return; }
+      if (password !== confirm) { setError('Passwords do not match.'); return; }
+    }
     setBusy(true);
     setError('');
-    const err = mode === 'login' ? await login(email, password) : await signup(email, password);
+    const err = mode === 'login'
+      ? await login(email, password)
+      : await signup(email, password, { first_name: first.trim(), last_name: last.trim(), grower_type: role });
     setBusy(false);
     if (err) setError(err);
     // On success the auth state changes and the app loads automatically.
   };
+  const enter = (e) => { if (e.key === 'Enter') submit(); };
 
   return (
     <div className="login">
@@ -29,9 +43,27 @@ export default function Login() {
       </div>
 
       <div className="card">
-        <input className="input" type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
-        <input className="input" type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') submit(); }} />
+        {mode === 'signup' && (
+          <div className="row2">
+            <input className="input" placeholder="First name" autoComplete="given-name" value={first} onChange={(e) => setFirst(e.target.value)} />
+            <input className="input" placeholder="Last name" autoComplete="family-name" value={last} onChange={(e) => setLast(e.target.value)} />
+          </div>
+        )}
+        <input className="input" type="email" placeholder="Email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+        <input className="input" type="password" placeholder="Password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+          value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={mode === 'login' ? enter : undefined} />
+        {mode === 'signup' && (
+          <>
+            <input className="input" type="password" placeholder="Confirm password" autoComplete="new-password"
+              value={confirm} onChange={(e) => setConfirm(e.target.value)} onKeyDown={enter} />
+            <div className="fieldlabel">I grow as a...</div>
+            <div className="rolechips">
+              {ROLES.map((r) => (
+                <button key={r} type="button" className={`rolechip ${role === r ? 'active' : ''}`} onClick={() => setRole(r)}>{r}</button>
+              ))}
+            </div>
+          </>
+        )}
 
         {error && <p className="center" style={{ color: 'var(--red)', fontSize: 13, margin: '0 0 10px' }}>{error}</p>}
 

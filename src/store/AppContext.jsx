@@ -3,6 +3,7 @@ import { seedReading, nextReading } from './helpers';
 import { TIERS } from './tiers';
 import { useAuth } from '../auth/AuthProvider';
 import { supabase } from '../supabaseClient';
+import { geocodePlace } from '../utils/geocode';
 
 /* ============================================================
    AppContext
@@ -133,6 +134,10 @@ export function AppProvider({ children }) {
   useEffect(() => save('journals', journals), [journals]);
 
   // Shared weather (virtual rain gauge), used by the weather card and rain alarms.
+  // Pinned to the selected device's HOME location when it has one, so the
+  // forecast follows the plant, not the owner's phone on vacation.
+  const selectedForWeather = devices.find((d) => d.id === selectedDeviceId) || devices[0];
+  const pinnedGeo = selectedForWeather ? selectedForWeather.geo : null;
   useEffect(() => {
     let cancelled = false;
     const unit = settings.units === 'C' ? 'celsius' : 'fahrenheit';
@@ -144,6 +149,7 @@ export function AppProvider({ children }) {
           if (cancelled) return;
           setWeather({
             label,
+            pinned: !!pinnedGeo,
             temp: Math.round(d.current.temperature_2m),
             code: d.current.weather_code,
             rainChance: d.daily.precipitation_probability_max?.[0] ?? 0,
@@ -154,7 +160,9 @@ export function AppProvider({ children }) {
         .catch(() => { if (!cancelled) setWeather({ error: true }); });
     };
     const DEF = { lat: 25.7617, lon: -80.1918, label: 'Miami, FL' };
-    if (navigator.geolocation) {
+    if (pinnedGeo) {
+      fetchFor(pinnedGeo.lat, pinnedGeo.lon, pinnedGeo.label);
+    } else if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (pos) => fetchFor(pos.coords.latitude, pos.coords.longitude, 'Your location'),
         () => fetchFor(DEF.lat, DEF.lon, DEF.label),
@@ -164,10 +172,10 @@ export function AppProvider({ children }) {
       fetchFor(DEF.lat, DEF.lon, DEF.label);
     }
     return () => { cancelled = true; };
-  }, [settings.units]);
-  const deviceSig = devices.map((d) => `${d.id}|${d.name}|${d.location}|${d.transport}|${d.plant}|${JSON.stringify(d.irrigation)}|${d.losantDeviceId || ''}`).join(',');
+  }, [settings.units, pinnedGeo && pinnedGeo.lat, pinnedGeo && pinnedGeo.lon]); // eslint-disable-line react-hooks/exhaustive-deps
+  const deviceSig = devices.map((d) => `${d.id}|${d.name}|${d.location}|${d.transport}|${d.plant}|${JSON.stringify(d.irrigation)}|${d.losantDeviceId || ''}|${d.geo ? d.geo.lat + ',' + d.geo.lon : ''}`).join(',');
   useEffect(() => {
-    save('devices', devices.map((d) => ({ id: d.id, name: d.name, location: d.location, transport: d.transport, plant: d.plant, irrigation: d.irrigation, losantDeviceId: d.losantDeviceId })));
+    save('devices', devices.map((d) => ({ id: d.id, name: d.name, location: d.location, transport: d.transport, plant: d.plant, irrigation: d.irrigation, losantDeviceId: d.losantDeviceId, geo: d.geo })));
   }, [deviceSig]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const addDevice = useCallback((name, location, transport) => {
@@ -178,7 +186,7 @@ export function AppProvider({ children }) {
 
   // Claim a real device by its short pairing code. Looks the code up in the
   // device registry; only a code that maps to a real unit is accepted.
-  const claimDevice = useCallback(async (code, name) => {
+  const claimDevice = useCallback(async (code, name, place) => {
     const claimCode = (code || '').trim().toUpperCase();
     if (!claimCode) return 'Enter the pairing code from your device.';
     if (!supabase) return 'Accounts service unavailable.';
@@ -188,8 +196,19 @@ export function AppProvider({ children }) {
       .eq('claim_code', claimCode)
       .maybeSingle();
     if (error || !data) return 'That pairing code wasn’t recognized. Double-check the code on your unit.';
+    // Pin the plant to its real home so weather stays correct even when the
+    // owner is traveling. Geocode failure is non-fatal; weather falls back.
+    const geo = place && place.trim() ? await geocodePlace(place.trim()) : null;
     const id = 'node-' + Math.random().toString(36).slice(2, 6);
-    setDevices((ds) => [...ds, buildDevice({ id, name: name || 'My Plant', location: '', transport: 'wifi', plant: 'generic', losantDeviceId: data.losant_device_id })]);
+    setDevices((ds) => [...ds, buildDevice({
+      id,
+      name: name || 'My Plant',
+      location: geo ? geo.label : (place || '').trim(),
+      transport: 'wifi',
+      plant: 'generic',
+      losantDeviceId: data.losant_device_id,
+      geo: geo || undefined,
+    })]);
     setSelectedDeviceId(id);
     return null;
   }, []);
@@ -201,8 +220,16 @@ export function AppProvider({ children }) {
   const updateDevice = useCallback((id, patch) => {
     setDevices((ds) => ds.map((d) => (d.id === id ? { ...d, ...patch } : d)));
   }, []);
+  // Removing a device also purges everything tied to it (journal, photos,
+  // device-specific alarms) so a resold unit leaves nothing behind.
   const removeDevice = useCallback((id) => {
-    setDevices((ds) => (ds.length <= 1 ? ds : ds.filter((d) => d.id !== id)));
+    setDevices((ds) => ds.filter((d) => d.id !== id));
+    setJournals((j) => {
+      const next = { ...j };
+      delete next[id];
+      return next;
+    });
+    setAlarmRules((rs) => rs.filter((r) => r.deviceId !== id));
   }, []);
 
   const setIrrigation = useCallback((id, patch) => {
@@ -251,8 +278,14 @@ export function AppProvider({ children }) {
 
   const selectedDevice = devices.find((d) => d.id === selectedDeviceId) || devices[0];
 
+  // Prefer the real name from signup metadata; fall back to the email prefix.
+  const meta = user.user_metadata || {};
+  const displayName = meta.first_name
+    ? `${meta.first_name} ${meta.last_name || ''}`.trim()
+    : (user.email || 'user').split('@')[0];
+
   const value = {
-    user: { id: user.id, email: user.email, name: (user.email || 'user').split('@')[0] }, logout,
+    user: { id: user.id, email: user.email, name: displayName, growerType: meta.grower_type || '' }, logout,
     devices, selectedDevice, selectedDeviceId, setSelectedDeviceId, addDevice, claimDevice, setDevicePlant, updateDevice, removeDevice, setIrrigation, runPump, isDemo,
     alarmRules, addAlarmRule, addAlarmRules, updateAlarmRule, removeAlarmRule,
     settings, updateSettings,
