@@ -1,11 +1,21 @@
+import { useState } from 'react';
 import { useApp } from '../store/AppContext';
-import { METRICS, activeAlerts, alarmsFromPlant, rangesForDevice } from '../store/helpers';
-import { Pills, Slider, Toggle } from '../components/UI';
+import { METRICS, METRIC_ORDER, activeAlerts, alarmsFromPlant, rangesForDevice } from '../store/helpers';
+import { Pills, Slider, Toggle, MetricIcon } from '../components/UI';
 import { AlertTriangle, Plus, Trash2, Wand2 } from 'lucide-react';
+
+// Seed a reasonable rule for a chosen sensor: high-side for temperatures,
+// low-side for moisture and humidity.
+function defaultRuleFor(metric) {
+  const m = METRICS[metric];
+  const high = metric === 'airTemperatureF' || metric === 'soilTemperatureF';
+  return { metric, op: high ? 'above' : 'below', value: high ? m.good[1] : m.good[0] };
+}
 
 export default function AlarmsView() {
   const { devices, selectedDevice, alarmRules, updateAlarmRule, addAlarmRule, addAlarmRules, removeAlarmRule } = useApp();
   const alerts = activeAlerts(devices, alarmRules);
+  const [addOpen, setAddOpen] = useState(false);
 
   const autoSet = () => addAlarmRules(alarmsFromPlant(selectedDevice.id, rangesForDevice(selectedDevice)));
 
@@ -67,9 +77,39 @@ export default function AlarmsView() {
         })}
       </div>
 
-      <button className="btn btn--green" style={{ marginTop: 12 }} onClick={() => addAlarmRule({ metric: 'soilMoisturePercent', op: 'below', value: 30 })}>
+      <button className="btn btn--green" style={{ marginTop: 12 }} onClick={() => setAddOpen(true)}>
         <Plus size={16} style={{ verticalAlign: '-3px', marginRight: 6 }} />Add alarm rule
       </button>
+
+      {addOpen && (
+        <AddAlarmSheet
+          onPick={(metric) => { addAlarmRule(defaultRuleFor(metric)); setAddOpen(false); }}
+          onClose={() => setAddOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+function AddAlarmSheet({ onPick, onClose }) {
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="sheet__grab" />
+        <h2>New alarm</h2>
+        <p className="muted" style={{ marginTop: -6, marginBottom: 12 }}>Which sensor should this alarm watch?</p>
+        <div className="plantgrid">
+          {METRIC_ORDER.map((k) => {
+            const m = METRICS[k];
+            return (
+              <button key={k} className="plantopt" onClick={() => onPick(k)}>
+                <MetricIcon name={m.icon} size={24} color={m.color} />
+                {m.short}
+              </button>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }
