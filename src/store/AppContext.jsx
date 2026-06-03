@@ -31,9 +31,9 @@ function save(name, value) {
 }
 
 const STARTER_DEVICES = [
-  { id: 'node-01', name: 'Greenhouse Node', location: 'Greenhouse A', transport: 'wifi', plant: 'fern' },
+  { id: 'node-01', name: 'Greenhouse Node', location: 'Greenhouse A', transport: 'wifi', plant: 'boston-fern' },
   { id: 'node-02', name: 'Field Sensor', location: 'North Field', transport: 'lorawan', plant: 'tomato' },
-  { id: 'node-03', name: 'Lab Bench', location: 'Lab', transport: 'ethernet', plant: 'succulent' },
+  { id: 'node-03', name: 'Lab Bench', location: 'Lab', transport: 'ethernet', plant: 'aloe-vera' },
 ];
 
 function buildDevice(d) {

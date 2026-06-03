@@ -402,3 +402,20 @@ input[type='range'].slider::-moz-range-thumb {
 .skeleton { background: var(--card-2); border-radius: 12px; position: relative; overflow: hidden; }
 .skeleton::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.08), transparent); animation: shimmer 1.4s infinite; }
 @keyframes shimmer { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+
+/* ---------- Searchable plant list ---------- */
+.sheet--tall { max-height: 85vh; display: flex; flex-direction: column; }
+.plantlist { flex: 1; overflow-y: auto; margin: 8px -6px 0; padding: 0 2px; }
+.plantrow {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  padding: 10px; border: none; background: none; border-radius: 12px;
+  cursor: pointer; font: inherit; color: inherit; text-align: left;
+}
+.plantrow:active { background: var(--card-2); }
+.plantrow.active { background: var(--green-soft); }
+.plantrow.active .plantrow__name { color: var(--green-d); }
+.plantrow__emoji { font-size: 22px; width: 28px; text-align: center; flex-shrink: 0; }
+.plantrow__txt { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.plantrow__name { font-weight: 700; font-size: 14px; }
+.plantrow__sci { font-size: 11.5px; color: var(--ink-3); font-style: italic; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plantrow__range { font-size: 12px; color: var(--ink-3); white-space: nowrap; flex-shrink: 0; }

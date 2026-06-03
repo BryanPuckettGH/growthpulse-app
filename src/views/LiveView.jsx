@@ -7,6 +7,7 @@ import {
 import { MetricIcon, TransportIcon, Gauge, statusColor } from '../components/UI';
 import Chart from '../components/Chart';
 import WeatherCard from '../components/WeatherCard';
+import PlantPicker from '../components/PlantPicker';
 import { AlertTriangle, Info, CheckCircle2, TrendingUp, TrendingDown, Minus, ChevronRight } from 'lucide-react';
 
 const HERO = ['airTemperatureF', 'airHumidity', 'soilMoisturePercent'];
@@ -121,35 +122,6 @@ export default function LiveView() {
           onClose={() => setPlantOpen(false)}
         />
       )}
-    </div>
-  );
-}
-
-function PlantPicker({ current, onPick, onClose }) {
-  const groups = [
-    { title: 'House plants', items: Object.values(PLANTS).filter((p) => p.category === 'house') },
-    { title: 'Yard plants', items: Object.values(PLANTS).filter((p) => p.category === 'yard') },
-  ];
-  return (
-    <div className="overlay" onClick={onClose}>
-      <div className="sheet" onClick={(e) => e.stopPropagation()}>
-        <div className="sheet__grab" />
-        <h2>Choose a plant</h2>
-        <p className="muted" style={{ marginTop: -6, marginBottom: 10 }}>The ranges auto-adjust to what this plant needs.</p>
-        {groups.map((g) => (
-          <div key={g.title}>
-            <div className="section-title" style={{ marginTop: 6 }}>{g.title}</div>
-            <div className="plantgrid">
-              {g.items.map((p) => (
-                <button key={p.id} className={`plantopt ${current === p.id ? 'active' : ''}`} onClick={() => onPick(p.id)}>
-                  <span className="plantopt__emoji">{p.emoji}</span>
-                  {p.name}
-                </button>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
     </div>
   );
 }

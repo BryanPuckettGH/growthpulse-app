@@ -24,41 +24,10 @@ export const METRICS = {
 
 export const METRIC_ORDER = ['airTemperatureF', 'airHumidity', 'soilMoisturePercent', 'soilTemperatureF'];
 
-// Plant catalog. Selecting a plant for a device shifts its ideal ranges, which
-// drives the status colors, health score, recommendations, and alarm guidance.
-export const PLANTS = {
-  generic: { id: 'generic', name: 'Generic plant', category: 'house', emoji: '🌿', ranges: {} },
-  fern: { id: 'fern', name: 'Fern', category: 'house', emoji: '🌿', ranges: {
-    soilMoisturePercent: { good: [55, 85], warn: [45, 92] },
-    airHumidity: { good: [60, 85], warn: [50, 92] },
-    airTemperatureF: { good: [60, 75], warn: [55, 82] },
-  } },
-  succulent: { id: 'succulent', name: 'Succulent', category: 'house', emoji: '🪴', ranges: {
-    soilMoisturePercent: { good: [10, 35], warn: [5, 50] },
-    airHumidity: { good: [20, 45], warn: [10, 55] },
-    airTemperatureF: { good: [65, 85], warn: [55, 92] },
-  } },
-  herb: { id: 'herb', name: 'Herb (basil)', category: 'house', emoji: '🌱', ranges: {
-    soilMoisturePercent: { good: [40, 70], warn: [30, 80] },
-    airHumidity: { good: [40, 65], warn: [30, 75] },
-    airTemperatureF: { good: [65, 80], warn: [58, 88] },
-  } },
-  tomato: { id: 'tomato', name: 'Tomato', category: 'yard', emoji: '🍅', ranges: {
-    soilMoisturePercent: { good: [45, 75], warn: [35, 85] },
-    airHumidity: { good: [40, 70], warn: [30, 80] },
-    airTemperatureF: { good: [65, 85], warn: [55, 92] },
-  } },
-  pepper: { id: 'pepper', name: 'Pepper', category: 'yard', emoji: '🌶️', ranges: {
-    soilMoisturePercent: { good: [45, 70], warn: [35, 82] },
-    airHumidity: { good: [40, 65], warn: [30, 78] },
-    airTemperatureF: { good: [68, 88], warn: [60, 95] },
-  } },
-  lawn: { id: 'lawn', name: 'Lawn / grass', category: 'yard', emoji: '🌾', ranges: {
-    soilMoisturePercent: { good: [40, 70], warn: [30, 82] },
-    airHumidity: { good: [35, 75], warn: [25, 85] },
-    airTemperatureF: { good: [55, 85], warn: [45, 95] },
-  } },
-};
+// Plant catalog lives in plants.js (a large searchable database). Re-export it
+// here so existing imports keep working.
+import { PLANTS } from './plants';
+export { PLANTS };
 
 // Build the default range table from the metric metadata.
 export function defaultRanges() {
