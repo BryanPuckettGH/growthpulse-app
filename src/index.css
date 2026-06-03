@@ -28,6 +28,9 @@
 }
 
 * { box-sizing: border-box; }
+/* Form fields don't inherit the app font by default; without this, typed text
+   renders in the browser's fallback font and looks subtly off. */
+input, select, textarea, button { font-family: inherit; }
 html, body, #root { height: 100%; }
 body {
   margin: 0;
@@ -55,7 +58,8 @@ body {
   z-index: 20;
   background: rgba(238, 240, 242, 0.85);
   backdrop-filter: saturate(180%) blur(12px);
-  padding: 14px 18px 10px;
+  /* Extra top padding when installed to the iPhone home screen (notch area). */
+  padding: calc(14px + env(safe-area-inset-top, 0px)) 18px 10px;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -267,7 +271,8 @@ input[type='range'].slider::-moz-range-thumb {
 /* ---------- Login ---------- */
 .login {
   min-height: 100vh; display: flex; flex-direction: column; justify-content: center;
-  max-width: var(--maxw); margin: 0 auto; padding: 24px;
+  max-width: var(--maxw); margin: 0 auto;
+  padding: calc(24px + env(safe-area-inset-top, 0px)) 24px calc(24px + env(safe-area-inset-bottom, 0px));
   background: radial-gradient(120% 80% at 50% -10%, #d8f3df 0%, var(--bg) 55%);
 }
 .brand { text-align: center; margin-bottom: 30px; }
