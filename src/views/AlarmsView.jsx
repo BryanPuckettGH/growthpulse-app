@@ -1,13 +1,13 @@
 import { useApp } from '../store/AppContext';
-import { METRICS, activeAlerts } from '../store/helpers';
+import { METRICS, activeAlerts, alarmsFromPlant, rangesForDevice } from '../store/helpers';
 import { Pills, Slider, Toggle } from '../components/UI';
-import { AlertTriangle, Plus, Trash2 } from 'lucide-react';
+import { AlertTriangle, Plus, Trash2, Wand2 } from 'lucide-react';
 
-// The "Control" tab idea from the reference, repurposed: each card is a
-// threshold rule you tune with a slider, an above/below toggle, and on/off.
 export default function AlarmsView() {
-  const { devices, alarmRules, updateAlarmRule, addAlarmRule, removeAlarmRule } = useApp();
+  const { devices, selectedDevice, alarmRules, updateAlarmRule, addAlarmRule, addAlarmRules, removeAlarmRule } = useApp();
   const alerts = activeAlerts(devices, alarmRules);
+
+  const autoSet = () => addAlarmRules(alarmsFromPlant(selectedDevice.id, rangesForDevice(selectedDevice)));
 
   return (
     <div>
@@ -32,38 +32,42 @@ export default function AlarmsView() {
       })}
 
       <div className="section-title">Alarm rules</div>
+
+      <button className="btn btn--ghost" style={{ marginBottom: 12 }} onClick={autoSet}>
+        <Wand2 size={15} style={{ verticalAlign: '-3px', marginRight: 6 }} />Auto-set alarms for {selectedDevice.name}
+      </button>
+
       <div className="cardgrid">
-      {alarmRules.map((rule) => {
-        const m = METRICS[rule.metric];
-        return (
-          <div className="card" key={rule.id}>
-            <div className="field__row">
-              <div className="field__label">{m.label}</div>
-              <Toggle checked={rule.enabled} onChange={(v) => updateAlarmRule(rule.id, { enabled: v })} />
+        {alarmRules.map((rule) => {
+          const m = METRICS[rule.metric];
+          return (
+            <div className="card" key={rule.id}>
+              <div className="field__row">
+                <div className="field__label">{m.label}</div>
+                <Toggle checked={rule.enabled} onChange={(v) => updateAlarmRule(rule.id, { enabled: v })} />
+              </div>
+              <select className="input" value={rule.deviceId || 'all'} onChange={(e) => updateAlarmRule(rule.id, { deviceId: e.target.value })} style={{ marginBottom: 12 }}>
+                <option value="all">All devices</option>
+                {devices.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </select>
+              <div style={{ marginBottom: 14 }}>
+                <Pills options={[{ value: 'below', label: 'Below' }, { value: 'above', label: 'Above' }]} value={rule.op} onChange={(v) => updateAlarmRule(rule.id, { op: v })} blue />
+              </div>
+              <div className="field__row">
+                <span className="muted">Trigger threshold</span>
+                <span className="field__value">{rule.value}{m.unit}</span>
+              </div>
+              <Slider min={m.min} max={m.max} value={rule.value} onChange={(v) => updateAlarmRule(rule.id, { value: v })} />
+              <div className="ticks"><span>{m.min}{m.unit}</span><span>{m.max}{m.unit}</span></div>
+              <button className="btn btn--ghost" style={{ marginTop: 12 }} onClick={() => removeAlarmRule(rule.id)}>
+                <Trash2 size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />Remove rule
+              </button>
             </div>
-            <div style={{ margin: '4px 0 14px' }}>
-              <Pills
-                options={[{ value: 'below', label: 'Below' }, { value: 'above', label: 'Above' }]}
-                value={rule.op}
-                onChange={(v) => updateAlarmRule(rule.id, { op: v })}
-                blue
-              />
-            </div>
-            <div className="field__row">
-              <span className="muted">Trigger threshold</span>
-              <span className="field__value">{rule.value}{m.unit}</span>
-            </div>
-            <Slider min={m.min} max={m.max} value={rule.value} onChange={(v) => updateAlarmRule(rule.id, { value: v })} />
-            <div className="ticks"><span>{m.min}{m.unit}</span><span>{m.max}{m.unit}</span></div>
-            <button className="btn btn--ghost" style={{ marginTop: 12 }} onClick={() => removeAlarmRule(rule.id)}>
-              <Trash2 size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />Remove rule
-            </button>
-          </div>
-        );
-      })}
+          );
+        })}
       </div>
 
-      <button className="btn btn--green" onClick={() => addAlarmRule({ metric: 'soilMoisturePercent', op: 'below', value: 30 })}>
+      <button className="btn btn--green" style={{ marginTop: 12 }} onClick={() => addAlarmRule({ metric: 'soilMoisturePercent', op: 'below', value: 30 })}>
         <Plus size={16} style={{ verticalAlign: '-3px', marginRight: 6 }} />Add alarm rule
       </button>
     </div>

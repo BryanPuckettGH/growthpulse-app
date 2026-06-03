@@ -43,9 +43,9 @@ function buildDevice(d) {
 }
 
 const DEFAULT_ALARMS = [
-  { id: 'a1', metric: 'soilMoisturePercent', op: 'below', value: 25, enabled: true },
-  { id: 'a2', metric: 'airTemperatureF', op: 'above', value: 85, enabled: true },
-  { id: 'a3', metric: 'airHumidity', op: 'below', value: 30, enabled: false },
+  { id: 'a1', metric: 'soilMoisturePercent', op: 'below', value: 25, enabled: true, deviceId: 'all' },
+  { id: 'a2', metric: 'airTemperatureF', op: 'above', value: 85, enabled: true, deviceId: 'all' },
+  { id: 'a3', metric: 'airHumidity', op: 'below', value: 30, enabled: false, deviceId: 'all' },
 ];
 
 export function AppProvider({ children }) {
@@ -60,6 +60,7 @@ export function AppProvider({ children }) {
   const [settings, setSettings] = useState(() => load('settings', { units: 'F', refreshMs: 2000, theme: 'auto' }));
   const [tierId, setTierId] = useState(() => load('tier', 'free'));
   const [showPlans, setShowPlans] = useState(false);
+  const [journals, setJournals] = useState(() => load('journals', {}));
 
   // Live simulation: advance every device's reading every 2 seconds.
   useEffect(() => {
@@ -80,6 +81,7 @@ export function AppProvider({ children }) {
   useEffect(() => save('selectedDeviceId', selectedDeviceId), [selectedDeviceId]);
   useEffect(() => save('settings', settings), [settings]);
   useEffect(() => save('tier', tierId), [tierId]);
+  useEffect(() => save('journals', journals), [journals]);
   const deviceSig = devices.map((d) => `${d.id}|${d.name}|${d.location}|${d.transport}|${d.plant}`).join(',');
   useEffect(() => {
     save('devices', devices.map((d) => ({ id: d.id, name: d.name, location: d.location, transport: d.transport, plant: d.plant })));
@@ -101,11 +103,28 @@ export function AppProvider({ children }) {
     setDevices((ds) => ds.map((d) => (d.id === id ? { ...d, plant } : d)));
   }, []);
 
+  const updateDevice = useCallback((id, patch) => {
+    setDevices((ds) => ds.map((d) => (d.id === id ? { ...d, ...patch } : d)));
+  }, []);
+  const removeDevice = useCallback((id) => {
+    setDevices((ds) => (ds.length <= 1 ? ds : ds.filter((d) => d.id !== id)));
+  }, []);
+
+  const addJournalEntry = useCallback((deviceId, entry) => {
+    setJournals((j) => ({ ...j, [deviceId]: [{ id: 'e' + Date.now(), date: Date.now(), ...entry }, ...(j[deviceId] || [])] }));
+  }, []);
+  const removeJournalEntry = useCallback((deviceId, entryId) => {
+    setJournals((j) => ({ ...j, [deviceId]: (j[deviceId] || []).filter((e) => e.id !== entryId) }));
+  }, []);
+
   const updateAlarmRule = useCallback((id, patch) => {
     setAlarmRules((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   }, []);
   const addAlarmRule = useCallback((rule) => {
-    setAlarmRules((rs) => [...rs, { id: 'a' + Date.now(), enabled: true, ...rule }]);
+    setAlarmRules((rs) => [...rs, { id: 'a' + Date.now(), enabled: true, deviceId: 'all', ...rule }]);
+  }, []);
+  const addAlarmRules = useCallback((rules) => {
+    setAlarmRules((rs) => [...rs, ...rules.map((r, i) => ({ id: 'a' + Date.now() + '-' + i, enabled: true, deviceId: 'all', ...r }))]);
   }, []);
   const removeAlarmRule = useCallback((id) => {
     setAlarmRules((rs) => rs.filter((r) => r.id !== id));
@@ -121,10 +140,11 @@ export function AppProvider({ children }) {
 
   const value = {
     user, login, logout,
-    devices, selectedDevice, selectedDeviceId, setSelectedDeviceId, addDevice, setDevicePlant,
-    alarmRules, addAlarmRule, updateAlarmRule, removeAlarmRule,
+    devices, selectedDevice, selectedDeviceId, setSelectedDeviceId, addDevice, setDevicePlant, updateDevice, removeDevice,
+    alarmRules, addAlarmRule, addAlarmRules, updateAlarmRule, removeAlarmRule,
     settings, updateSettings,
     tier: TIERS[tierId] || TIERS.free, tierId, setTier, showPlans, openPlans, closePlans,
+    journals, addJournalEntry, removeJournalEntry,
   };
 
   return <AppCtx.Provider value={value}>{children}</AppCtx.Provider>;

@@ -118,7 +118,7 @@ export function nextReading(prev) {
 
 /* Build a history series for the HOUR/DAY/WEEK/MONTH charts, with the
    Max / Avg / Min stats shown in the reference design. */
-export function buildSeries(key, range) {
+export function buildSeries(key, range, good) {
   const conf = {
     HOUR: { n: 60, stepMs: 60000, fmt: (d) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) },
     DAY: { n: 24, stepMs: 3600000, fmt: (d) => d.toLocaleTimeString([], { hour: '2-digit' }) },
@@ -127,13 +127,14 @@ export function buildSeries(key, range) {
   }[range];
 
   const m = METRICS[key];
-  const mid = (m.good[0] + m.good[1]) / 2;
-  const amp = m.good[1] - m.good[0];
+  const band = good || m.good;
+  const mid = (band[0] + band[1]) / 2;
+  const amp = band[1] - band[0];
   const now = Date.now();
   let v = mid;
   const points = [];
   for (let i = conf.n - 1; i >= 0; i--) {
-    v = clamp(v + (Math.random() - 0.5) * amp * 0.45, m.warn[0], m.warn[1]);
+    v = clamp(v + (Math.random() - 0.5) * amp * 0.45, m.min, m.max);
     points.push({ t: conf.fmt(new Date(now - i * conf.stepMs)), value: +v.toFixed(1) });
   }
   const vals = points.map((p) => p.value);
@@ -149,6 +150,7 @@ export function activeAlerts(devices, rules) {
   for (const d of devices) {
     for (const r of rules) {
       if (!r.enabled) continue;
+      if (r.deviceId && r.deviceId !== 'all' && r.deviceId !== d.id) continue;
       const v = d.reading[r.metric];
       if (v == null) continue;
       const hit = r.op === 'below' ? v < r.value : v > r.value;
@@ -156,6 +158,15 @@ export function activeAlerts(devices, rules) {
     }
   }
   return out;
+}
+
+// Generate a starter alarm set from a device's plant ideal ranges.
+export function alarmsFromPlant(deviceId, ranges) {
+  return [
+    { metric: 'soilMoisturePercent', op: 'below', value: ranges.soilMoisturePercent.good[0], deviceId },
+    { metric: 'airTemperatureF', op: 'above', value: ranges.airTemperatureF.good[1], deviceId },
+    { metric: 'airHumidity', op: 'below', value: ranges.airHumidity.good[0], deviceId },
+  ];
 }
 
 export const TRANSPORTS = {

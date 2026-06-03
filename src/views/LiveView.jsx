@@ -8,6 +8,7 @@ import { MetricIcon, TransportIcon, Gauge, statusColor } from '../components/UI'
 import Chart from '../components/Chart';
 import WeatherCard from '../components/WeatherCard';
 import PlantPicker from '../components/PlantPicker';
+import GrowthJournal from '../components/GrowthJournal';
 import { AlertTriangle, Info, CheckCircle2, TrendingUp, TrendingDown, Minus, ChevronRight, CloudRain, Sparkles } from 'lucide-react';
 
 const HERO = ['airTemperatureF', 'airHumidity', 'soilMoisturePercent'];
@@ -124,6 +125,8 @@ export default function LiveView() {
           );
         })}
       </div>
+
+      <GrowthJournal />
 
       {detailKey && (
         <MetricDetail metricKey={detailKey} device={selectedDevice} units={u} onClose={() => setDetailKey(null)} />

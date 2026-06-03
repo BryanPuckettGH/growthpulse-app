@@ -433,3 +433,30 @@ input[type='range'].slider::-moz-range-thumb {
 .plan__perk { display: flex; align-items: center; gap: 8px; font-size: 13.5px; }
 .thanks { text-align: center; padding: 14px 8px 8px; }
 .thanks__badge { width: 64px; height: 64px; border-radius: 50%; display: grid; place-items: center; margin: 0 auto 14px; }
+
+/* ---------- Toast ---------- */
+.toast {
+  position: fixed; left: 50%; bottom: 86px; transform: translateX(-50%);
+  background: var(--ink); color: var(--bg); padding: 11px 16px; border-radius: 12px;
+  font-size: 13px; font-weight: 600; box-shadow: var(--shadow); z-index: 60; max-width: 88%;
+  animation: fadeIn 0.2s ease;
+}
+
+/* ---------- Device edit button ---------- */
+.device__edit {
+  border: none; background: var(--card-2); width: 34px; height: 34px; border-radius: 10px;
+  display: grid; place-items: center; cursor: pointer; color: var(--ink-2); flex-shrink: 0; margin-left: 2px;
+}
+
+/* ---------- Growth journal ---------- */
+.journalstrip { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; }
+.journalthumb { border: none; padding: 0; background: none; cursor: pointer; flex-shrink: 0; }
+.journalthumb img { width: 70px; height: 70px; object-fit: cover; border-radius: 12px; display: block; }
+.jentry { display: flex; gap: 12px; align-items: center; padding: 10px 2px; }
+.jentry + .jentry { border-top: 1px solid var(--line); }
+.jentry__img { width: 72px; height: 72px; object-fit: cover; border-radius: 12px; flex-shrink: 0; }
+.jentry__body { flex: 1; min-width: 0; }
+.jentry__date { font-weight: 700; font-size: 13px; }
+.jentry__note { font-size: 13px; color: var(--ink-2); margin-top: 2px; }
+.jentry__del { border: none; background: none; color: var(--ink-3); cursor: pointer; padding: 6px; flex-shrink: 0; }
+select.input { appearance: none; -webkit-appearance: none; }
