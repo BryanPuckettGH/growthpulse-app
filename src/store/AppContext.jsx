@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { seedReading, nextReading } from './helpers';
+import { TIERS } from './tiers';
 
 /* ============================================================
    AppContext
@@ -57,6 +58,8 @@ export function AppProvider({ children }) {
   const [selectedDeviceId, setSelectedDeviceId] = useState(() => load('selectedDeviceId', STARTER_DEVICES[0].id));
   const [alarmRules, setAlarmRules] = useState(() => load('alarmRules', DEFAULT_ALARMS));
   const [settings, setSettings] = useState(() => load('settings', { units: 'F', refreshMs: 2000, theme: 'auto' }));
+  const [tierId, setTierId] = useState(() => load('tier', 'free'));
+  const [showPlans, setShowPlans] = useState(false);
 
   // Live simulation: advance every device's reading every 2 seconds.
   useEffect(() => {
@@ -76,6 +79,7 @@ export function AppProvider({ children }) {
   useEffect(() => save('alarmRules', alarmRules), [alarmRules]);
   useEffect(() => save('selectedDeviceId', selectedDeviceId), [selectedDeviceId]);
   useEffect(() => save('settings', settings), [settings]);
+  useEffect(() => save('tier', tierId), [tierId]);
   const deviceSig = devices.map((d) => `${d.id}|${d.name}|${d.location}|${d.transport}|${d.plant}`).join(',');
   useEffect(() => {
     save('devices', devices.map((d) => ({ id: d.id, name: d.name, location: d.location, transport: d.transport, plant: d.plant })));
@@ -109,6 +113,10 @@ export function AppProvider({ children }) {
 
   const updateSettings = useCallback((patch) => setSettings((s) => ({ ...s, ...patch })), []);
 
+  const setTier = useCallback((id) => setTierId(id), []);
+  const openPlans = useCallback(() => setShowPlans(true), []);
+  const closePlans = useCallback(() => setShowPlans(false), []);
+
   const selectedDevice = devices.find((d) => d.id === selectedDeviceId) || devices[0];
 
   const value = {
@@ -116,6 +124,7 @@ export function AppProvider({ children }) {
     devices, selectedDevice, selectedDeviceId, setSelectedDeviceId, addDevice, setDevicePlant,
     alarmRules, addAlarmRule, updateAlarmRule, removeAlarmRule,
     settings, updateSettings,
+    tier: TIERS[tierId] || TIERS.free, tierId, setTier, showPlans, openPlans, closePlans,
   };
 
   return <AppCtx.Provider value={value}>{children}</AppCtx.Provider>;

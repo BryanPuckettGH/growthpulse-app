@@ -2,17 +2,18 @@ import { useState } from 'react';
 import { useApp } from '../store/AppContext';
 import { TRANSPORTS } from '../store/helpers';
 import { TransportIcon } from '../components/UI';
-import { Plus, Sprout } from 'lucide-react';
+import { Plus, Sprout, Lock } from 'lucide-react';
 
 // List of all devices (tap to select) plus an add-device sheet that lets
 // you pick the connection type: Wi-Fi, LoRaWAN, or Ethernet.
 export default function DevicesView() {
-  const { devices, selectedDeviceId, setSelectedDeviceId, addDevice } = useApp();
+  const { devices, selectedDeviceId, setSelectedDeviceId, addDevice, tier, openPlans } = useApp();
   const [open, setOpen] = useState(false);
+  const atLimit = devices.length >= tier.deviceLimit;
 
   return (
     <div>
-      <div className="section-title">Your devices ({devices.length})</div>
+      <div className="section-title">Your devices ({devices.length}{tier.deviceLimit < 99 ? ` of ${tier.deviceLimit}` : ''})</div>
 
       <div className="cardgrid">
       {devices.map((d) => {
@@ -36,9 +37,15 @@ export default function DevicesView() {
       })}
       </div>
 
-      <button className="btn btn--green" style={{ marginTop: 6 }} onClick={() => setOpen(true)}>
-        <Plus size={16} style={{ verticalAlign: '-3px', marginRight: 6 }} />Add device
-      </button>
+      {atLimit ? (
+        <button className="btn btn--ghost" style={{ marginTop: 6 }} onClick={openPlans}>
+          <Lock size={15} style={{ verticalAlign: '-3px', marginRight: 6 }} />Device limit reached, upgrade for more
+        </button>
+      ) : (
+        <button className="btn btn--green" style={{ marginTop: 6 }} onClick={() => setOpen(true)}>
+          <Plus size={16} style={{ verticalAlign: '-3px', marginRight: 6 }} />Add device
+        </button>
+      )}
 
       {open && <AddDeviceSheet onClose={() => setOpen(false)} onAdd={addDevice} />}
     </div>

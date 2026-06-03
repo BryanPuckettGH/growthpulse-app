@@ -10,10 +10,22 @@ const REFRESH_OPTIONS = [
 ];
 
 export default function SettingsView() {
-  const { settings, updateSettings, user, logout } = useApp();
+  const { settings, updateSettings, user, logout, tier, openPlans } = useApp();
 
   return (
     <div>
+      <div className="section-title">Plan</div>
+      <div className="card">
+        <div className="field__row">
+          <div>
+            <div className="field__label">{tier.name} plan</div>
+            <div className="muted">{tier.tagline}</div>
+          </div>
+          <span className="badge" style={{ background: tier.color + '1a', color: tier.color }}>{tier.price}{tier.period}</span>
+        </div>
+        <button className="btn btn--green" style={{ marginTop: 12 }} onClick={openPlans}>See plans</button>
+      </div>
+
       <div className="section-title">Display</div>
 
       <div className="card">

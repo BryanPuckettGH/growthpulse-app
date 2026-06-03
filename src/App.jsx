@@ -6,6 +6,7 @@ import HistoryView from './views/HistoryView';
 import AlarmsView from './views/AlarmsView';
 import DevicesView from './views/DevicesView';
 import SettingsView from './views/SettingsView';
+import PlansSheet from './components/PlansSheet';
 import { activeAlerts } from './store/helpers';
 import { Activity, LineChart, Bell, LayoutGrid, Settings, ChevronDown } from 'lucide-react';
 
@@ -37,7 +38,7 @@ function useTheme(theme) {
 }
 
 function Shell() {
-  const { user, selectedDevice, devices, alarmRules, settings } = useApp();
+  const { user, selectedDevice, devices, alarmRules, settings, showPlans, closePlans } = useApp();
   const [tab, setTab] = useState('live');
   useTheme(settings.theme);
 
@@ -83,6 +84,8 @@ function Shell() {
           );
         })}
       </div>
+
+      {showPlans && <PlansSheet onClose={closePlans} />}
     </div>
   );
 }
