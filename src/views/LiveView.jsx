@@ -9,7 +9,8 @@ import Chart from '../components/Chart';
 import WeatherCard from '../components/WeatherCard';
 import PlantPicker from '../components/PlantPicker';
 import GrowthJournal from '../components/GrowthJournal';
-import { AlertTriangle, Info, CheckCircle2, TrendingUp, TrendingDown, Minus, ChevronRight, CloudRain, Sparkles } from 'lucide-react';
+import IrrigationCard from '../components/IrrigationCard';
+import { AlertTriangle, Info, CheckCircle2, TrendingUp, TrendingDown, Minus, ChevronRight, CloudRain, Sparkles, Droplet } from 'lucide-react';
 
 const HERO = ['airTemperatureF', 'airHumidity', 'soilMoisturePercent'];
 const CHIPS = ['airTemperatureF', 'soilTemperatureF', 'airHumidity', 'soilMoisturePercent'];
@@ -28,6 +29,19 @@ function LockedWeather({ onUpgrade }) {
       <div className="muted" style={{ margin: '4px 0 12px' }}>Local rain and heavy-sun alerts so you water smarter. A Plus feature.</div>
       <button className="btn btn--blue" onClick={onUpgrade}>
         <Sparkles size={15} style={{ verticalAlign: '-3px', marginRight: 6 }} />Unlock with Plus
+      </button>
+    </div>
+  );
+}
+
+function LockedIrrigation({ onUpgrade }) {
+  return (
+    <div className="card" style={{ textAlign: 'center' }}>
+      <Droplet size={28} color="var(--ink-3)" />
+      <div style={{ fontWeight: 700, marginTop: 6 }}>Automated watering</div>
+      <div className="muted" style={{ margin: '4px 0 12px' }}>Connect a pump and water automatically when the soil gets dry. A Pro feature.</div>
+      <button className="btn btn--blue" onClick={onUpgrade}>
+        <Sparkles size={15} style={{ verticalAlign: '-3px', marginRight: 6 }} />Unlock with Pro
       </button>
     </div>
   );
@@ -92,6 +106,8 @@ export default function LiveView() {
       </div>
 
       {tier.weather ? <WeatherCard /> : <LockedWeather onUpgrade={openPlans} />}
+
+      {tier.irrigation ? <IrrigationCard /> : <LockedIrrigation onUpgrade={openPlans} />}
 
       <div className="section-title">Sensors</div>
       <div className="chips">

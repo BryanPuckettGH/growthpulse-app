@@ -39,7 +39,13 @@ const STARTER_DEVICES = [
 
 function buildDevice(d) {
   const r = seedReading();
-  return { ...d, plant: d.plant || 'generic', online: true, reading: r, history: [r], lastSeen: r.time };
+  return {
+    ...d,
+    plant: d.plant || 'generic',
+    irrigation: d.irrigation || { mode: 'manual', targetMoisture: 35, durationSec: 5, enabled: false },
+    pumpRunning: false,
+    online: true, reading: r, history: [r], lastSeen: r.time,
+  };
 }
 
 const DEFAULT_ALARMS = [
@@ -82,9 +88,9 @@ export function AppProvider({ children }) {
   useEffect(() => save('settings', settings), [settings]);
   useEffect(() => save('tier', tierId), [tierId]);
   useEffect(() => save('journals', journals), [journals]);
-  const deviceSig = devices.map((d) => `${d.id}|${d.name}|${d.location}|${d.transport}|${d.plant}`).join(',');
+  const deviceSig = devices.map((d) => `${d.id}|${d.name}|${d.location}|${d.transport}|${d.plant}|${JSON.stringify(d.irrigation)}`).join(',');
   useEffect(() => {
-    save('devices', devices.map((d) => ({ id: d.id, name: d.name, location: d.location, transport: d.transport, plant: d.plant })));
+    save('devices', devices.map((d) => ({ id: d.id, name: d.name, location: d.location, transport: d.transport, plant: d.plant, irrigation: d.irrigation })));
   }, [deviceSig]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const login = useCallback((email) => {
@@ -108,6 +114,24 @@ export function AppProvider({ children }) {
   }, []);
   const removeDevice = useCallback((id) => {
     setDevices((ds) => (ds.length <= 1 ? ds : ds.filter((d) => d.id !== id)));
+  }, []);
+
+  const setIrrigation = useCallback((id, patch) => {
+    setDevices((ds) => ds.map((d) => (d.id === id ? { ...d, irrigation: { ...d.irrigation, ...patch } } : d)));
+  }, []);
+  const runPump = useCallback((id, seconds = 5) => {
+    setDevices((ds) => ds.map((d) => (d.id === id ? { ...d, pumpRunning: true } : d)));
+    setTimeout(() => {
+      setDevices((ds) => ds.map((d) => {
+        if (d.id !== id) return d;
+        const reading = {
+          ...d.reading,
+          soilRaw: Math.max(1300, d.reading.soilRaw - 600),
+          soilMoisturePercent: Math.min(100, d.reading.soilMoisturePercent + 25),
+        };
+        return { ...d, pumpRunning: false, reading };
+      }));
+    }, Math.min(seconds, 6) * 1000);
   }, []);
 
   const addJournalEntry = useCallback((deviceId, entry) => {
@@ -140,7 +164,7 @@ export function AppProvider({ children }) {
 
   const value = {
     user, login, logout,
-    devices, selectedDevice, selectedDeviceId, setSelectedDeviceId, addDevice, setDevicePlant, updateDevice, removeDevice,
+    devices, selectedDevice, selectedDeviceId, setSelectedDeviceId, addDevice, setDevicePlant, updateDevice, removeDevice, setIrrigation, runPump,
     alarmRules, addAlarmRule, addAlarmRules, updateAlarmRule, removeAlarmRule,
     settings, updateSettings,
     tier: TIERS[tierId] || TIERS.free, tierId, setTier, showPlans, openPlans, closePlans,
