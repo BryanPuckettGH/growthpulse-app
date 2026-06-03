@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { useApp } from '../store/AppContext';
 import {
-  METRICS, statusOf, healthScore, recommendations, TRANSPORTS,
+  METRICS, PLANTS, statusOf, healthScore, recommendations, rangesForDevice, TRANSPORTS,
   displayValue, displayUnit, trendOf,
 } from '../store/helpers';
 import { MetricIcon, TransportIcon, Gauge, statusColor } from '../components/UI';
 import Chart from '../components/Chart';
-import { AlertTriangle, Info, CheckCircle2, TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import WeatherCard from '../components/WeatherCard';
+import { AlertTriangle, Info, CheckCircle2, TrendingUp, TrendingDown, Minus, ChevronRight } from 'lucide-react';
 
 const HERO = ['airTemperatureF', 'airHumidity', 'soilMoisturePercent'];
 const CHIPS = ['airTemperatureF', 'soilTemperatureF', 'airHumidity', 'soilMoisturePercent'];
@@ -18,24 +19,37 @@ function TrendIcon({ trend }) {
 }
 
 export default function LiveView() {
-  const { selectedDevice, settings } = useApp();
+  const { selectedDevice, settings, setDevicePlant } = useApp();
   const r = selectedDevice.reading;
   const u = settings.units;
-  const health = healthScore(r);
-  const recs = recommendations(r);
+  const ranges = rangesForDevice(selectedDevice);
+  const health = healthScore(r, ranges);
+  const recs = recommendations(r, ranges);
   const t = TRANSPORTS[selectedDevice.transport];
   const healthColor = health >= 80 ? '#2ecc71' : health >= 55 ? '#f4a52b' : '#ef4444';
+  const plant = PLANTS[selectedDevice.plant] || PLANTS.generic;
   const [detailKey, setDetailKey] = useState(null);
+  const [plantOpen, setPlantOpen] = useState(false);
 
   return (
     <div>
+      <button className="plantbar" onClick={() => setPlantOpen(true)}>
+        <span className="plantbar__emoji">{plant.emoji}</span>
+        <span className="plantbar__txt">
+          <span className="plantbar__label">Plant profile</span>
+          <span className="plantbar__name">{plant.name}</span>
+        </span>
+        <span className="plantbar__range">ideal moisture {ranges.soilMoisturePercent.good[0]}–{ranges.soilMoisturePercent.good[1]}%</span>
+        <ChevronRight size={18} color="var(--ink-3)" />
+      </button>
+
       <div className="card">
         <div className="hero">
           {HERO.map((k) => {
             const m = METRICS[k];
             return (
               <div className="hero__metric" key={k}>
-                <div className="hero__val" style={{ color: statusColor(statusOf(k, r[k])) }}>
+                <div className="hero__val" style={{ color: statusColor(statusOf(k, r[k], ranges)) }}>
                   {displayValue(k, r[k], u)}<span className="hero__unit">{displayUnit(m.unit, u)}</span>
                 </div>
                 <div className="hero__label">{m.label}</div>
@@ -47,7 +61,7 @@ export default function LiveView() {
 
       <div className="card">
         <div className="gaugewrap">
-          <Gauge value={r.soilMoisturePercent} color={statusColor(statusOf('soilMoisturePercent', r.soilMoisturePercent))} label="Moisture" />
+          <Gauge value={r.soilMoisturePercent} color={statusColor(statusOf('soilMoisturePercent', r.soilMoisturePercent, ranges))} label="Moisture" />
           <div className="gauge__side">
             <div className="healthrow">
               <span className="health__score" style={{ color: healthColor }}>{health}</span>
@@ -62,11 +76,13 @@ export default function LiveView() {
         </div>
       </div>
 
+      <WeatherCard />
+
       <div className="section-title">Sensors</div>
       <div className="chips">
         {CHIPS.map((k) => {
           const m = METRICS[k];
-          const c = statusColor(statusOf(k, r[k]));
+          const c = statusColor(statusOf(k, r[k], ranges));
           const trend = trendOf(selectedDevice.history, k);
           return (
             <button className="chip chip--tap" key={k} onClick={() => setDetailKey(k)}>
@@ -98,12 +114,49 @@ export default function LiveView() {
       {detailKey && (
         <MetricDetail metricKey={detailKey} device={selectedDevice} units={u} onClose={() => setDetailKey(null)} />
       )}
+      {plantOpen && (
+        <PlantPicker
+          current={selectedDevice.plant}
+          onPick={(id) => { setDevicePlant(selectedDevice.id, id); setPlantOpen(false); }}
+          onClose={() => setPlantOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+function PlantPicker({ current, onPick, onClose }) {
+  const groups = [
+    { title: 'House plants', items: Object.values(PLANTS).filter((p) => p.category === 'house') },
+    { title: 'Yard plants', items: Object.values(PLANTS).filter((p) => p.category === 'yard') },
+  ];
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="sheet__grab" />
+        <h2>Choose a plant</h2>
+        <p className="muted" style={{ marginTop: -6, marginBottom: 10 }}>The ranges auto-adjust to what this plant needs.</p>
+        {groups.map((g) => (
+          <div key={g.title}>
+            <div className="section-title" style={{ marginTop: 6 }}>{g.title}</div>
+            <div className="plantgrid">
+              {g.items.map((p) => (
+                <button key={p.id} className={`plantopt ${current === p.id ? 'active' : ''}`} onClick={() => onPick(p.id)}>
+                  <span className="plantopt__emoji">{p.emoji}</span>
+                  {p.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
 
 function MetricDetail({ metricKey, device, units, onClose }) {
   const m = METRICS[metricKey];
+  const ranges = rangesForDevice(device);
   const points = device.history.map((h) => ({
     t: new Date(h.time).toLocaleTimeString([], { minute: '2-digit', second: '2-digit' }),
     value: displayValue(metricKey, h[metricKey], units),
@@ -112,7 +165,7 @@ function MetricDetail({ metricKey, device, units, onClose }) {
   const min = Math.min(...vals);
   const max = Math.max(...vals);
   const avg = Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10;
-  const c = statusColor(statusOf(metricKey, device.reading[metricKey]));
+  const c = statusColor(statusOf(metricKey, device.reading[metricKey], ranges));
   const unit = displayUnit(m.unit, units);
 
   return (

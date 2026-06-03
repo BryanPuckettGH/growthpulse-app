@@ -24,49 +24,101 @@ export const METRICS = {
 
 export const METRIC_ORDER = ['airTemperatureF', 'airHumidity', 'soilMoisturePercent', 'soilTemperatureF'];
 
-// good / warn / critical for one value
-export function statusOf(key, value) {
-  const m = METRICS[key];
-  if (!m || value == null) return 'good';
-  const [gl, gh] = m.good;
-  const [wl, wh] = m.warn;
+// Plant catalog. Selecting a plant for a device shifts its ideal ranges, which
+// drives the status colors, health score, recommendations, and alarm guidance.
+export const PLANTS = {
+  generic: { id: 'generic', name: 'Generic plant', category: 'house', emoji: '🌿', ranges: {} },
+  fern: { id: 'fern', name: 'Fern', category: 'house', emoji: '🌿', ranges: {
+    soilMoisturePercent: { good: [55, 85], warn: [45, 92] },
+    airHumidity: { good: [60, 85], warn: [50, 92] },
+    airTemperatureF: { good: [60, 75], warn: [55, 82] },
+  } },
+  succulent: { id: 'succulent', name: 'Succulent', category: 'house', emoji: '🪴', ranges: {
+    soilMoisturePercent: { good: [10, 35], warn: [5, 50] },
+    airHumidity: { good: [20, 45], warn: [10, 55] },
+    airTemperatureF: { good: [65, 85], warn: [55, 92] },
+  } },
+  herb: { id: 'herb', name: 'Herb (basil)', category: 'house', emoji: '🌱', ranges: {
+    soilMoisturePercent: { good: [40, 70], warn: [30, 80] },
+    airHumidity: { good: [40, 65], warn: [30, 75] },
+    airTemperatureF: { good: [65, 80], warn: [58, 88] },
+  } },
+  tomato: { id: 'tomato', name: 'Tomato', category: 'yard', emoji: '🍅', ranges: {
+    soilMoisturePercent: { good: [45, 75], warn: [35, 85] },
+    airHumidity: { good: [40, 70], warn: [30, 80] },
+    airTemperatureF: { good: [65, 85], warn: [55, 92] },
+  } },
+  pepper: { id: 'pepper', name: 'Pepper', category: 'yard', emoji: '🌶️', ranges: {
+    soilMoisturePercent: { good: [45, 70], warn: [35, 82] },
+    airHumidity: { good: [40, 65], warn: [30, 78] },
+    airTemperatureF: { good: [68, 88], warn: [60, 95] },
+  } },
+  lawn: { id: 'lawn', name: 'Lawn / grass', category: 'yard', emoji: '🌾', ranges: {
+    soilMoisturePercent: { good: [40, 70], warn: [30, 82] },
+    airHumidity: { good: [35, 75], warn: [25, 85] },
+    airTemperatureF: { good: [55, 85], warn: [45, 95] },
+  } },
+};
+
+// Build the default range table from the metric metadata.
+export function defaultRanges() {
+  const r = {};
+  for (const k of METRIC_ORDER) r[k] = { good: METRICS[k].good, warn: METRICS[k].warn };
+  return r;
+}
+
+// The effective ideal ranges for a device, with its plant's ranges layered on top.
+export function rangesForDevice(device) {
+  const base = defaultRanges();
+  const plant = device && device.plant ? PLANTS[device.plant] : null;
+  if (!plant || !plant.ranges) return base;
+  return { ...base, ...plant.ranges };
+}
+
+// good / warn / critical for one value, optionally against plant-specific ranges
+export function statusOf(key, value, ranges) {
+  const band = (ranges && ranges[key]) || (METRICS[key] && { good: METRICS[key].good, warn: METRICS[key].warn });
+  if (!band || value == null) return 'good';
+  const [gl, gh] = band.good;
+  const [wl, wh] = band.warn;
   if (value >= gl && value <= gh) return 'good';
   if (value >= wl && value <= wh) return 'warn';
   return 'critical';
 }
 
 // 0-100 overall plant health from the four metrics
-export function healthScore(reading) {
+export function healthScore(reading, ranges) {
   const weight = { good: 100, warn: 66, critical: 28 };
-  const scores = METRIC_ORDER.map((k) => weight[statusOf(k, reading[k])]);
+  const scores = METRIC_ORDER.map((k) => weight[statusOf(k, reading[k], ranges)]);
   return Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
 }
 
-// Human, plant-care recommendations based on what is off
-export function recommendations(reading) {
+// Human, plant-care recommendations, tuned to the device's plant ranges.
+export function recommendations(reading, ranges) {
+  const R = ranges || defaultRanges();
   const out = [];
   const sm = reading.soilMoisturePercent;
   const t = reading.airTemperatureF;
   const h = reading.airHumidity;
 
-  if (statusOf('soilMoisturePercent', sm) === 'critical' && sm < METRICS.soilMoisturePercent.warn[0])
+  if (sm < R.soilMoisturePercent.warn[0])
     out.push({ level: 'critical', text: 'Soil is very dry. Water the plant now.' });
-  else if (statusOf('soilMoisturePercent', sm) === 'warn' && sm < METRICS.soilMoisturePercent.good[0])
+  else if (sm < R.soilMoisturePercent.good[0])
     out.push({ level: 'warn', text: 'Soil moisture is getting low. Plan to water soon.' });
-  else if (sm > METRICS.soilMoisturePercent.warn[1])
+  else if (sm > R.soilMoisturePercent.warn[1])
     out.push({ level: 'warn', text: 'Soil is waterlogged. Hold off on watering and check drainage.' });
 
-  if (t > METRICS.airTemperatureF.warn[1])
+  if (t > R.airTemperatureF.warn[1])
     out.push({ level: 'critical', text: 'Air temperature is high. Add ventilation or shade.' });
-  else if (t < METRICS.airTemperatureF.warn[0])
-    out.push({ level: 'warn', text: 'Air temperature is low for most plants.' });
+  else if (t < R.airTemperatureF.warn[0])
+    out.push({ level: 'warn', text: 'Air temperature is low for this plant.' });
 
-  if (h < METRICS.airHumidity.warn[0])
+  if (h < R.airHumidity.warn[0])
     out.push({ level: 'warn', text: 'Humidity is low. Consider misting or a humidifier.' });
-  else if (h > METRICS.airHumidity.warn[1])
+  else if (h > R.airHumidity.warn[1])
     out.push({ level: 'warn', text: 'Humidity is high. Improve airflow to avoid mold.' });
 
-  if (out.length === 0) out.push({ level: 'good', text: 'Everything looks healthy. No action needed.' });
+  if (out.length === 0) out.push({ level: 'good', text: 'Everything looks ideal for this plant.' });
   return out;
 }
 

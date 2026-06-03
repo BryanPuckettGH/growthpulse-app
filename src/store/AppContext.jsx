@@ -31,14 +31,14 @@ function save(name, value) {
 }
 
 const STARTER_DEVICES = [
-  { id: 'node-01', name: 'Greenhouse Node', location: 'Greenhouse A', transport: 'wifi' },
-  { id: 'node-02', name: 'Field Sensor', location: 'North Field', transport: 'lorawan' },
-  { id: 'node-03', name: 'Lab Bench', location: 'Lab', transport: 'ethernet' },
+  { id: 'node-01', name: 'Greenhouse Node', location: 'Greenhouse A', transport: 'wifi', plant: 'fern' },
+  { id: 'node-02', name: 'Field Sensor', location: 'North Field', transport: 'lorawan', plant: 'tomato' },
+  { id: 'node-03', name: 'Lab Bench', location: 'Lab', transport: 'ethernet', plant: 'succulent' },
 ];
 
 function buildDevice(d) {
   const r = seedReading();
-  return { ...d, online: true, reading: r, history: [r], lastSeen: r.time };
+  return { ...d, plant: d.plant || 'generic', online: true, reading: r, history: [r], lastSeen: r.time };
 }
 
 const DEFAULT_ALARMS = [
@@ -76,9 +76,9 @@ export function AppProvider({ children }) {
   useEffect(() => save('alarmRules', alarmRules), [alarmRules]);
   useEffect(() => save('selectedDeviceId', selectedDeviceId), [selectedDeviceId]);
   useEffect(() => save('settings', settings), [settings]);
-  const deviceSig = devices.map((d) => `${d.id}|${d.name}|${d.location}|${d.transport}`).join(',');
+  const deviceSig = devices.map((d) => `${d.id}|${d.name}|${d.location}|${d.transport}|${d.plant}`).join(',');
   useEffect(() => {
-    save('devices', devices.map((d) => ({ id: d.id, name: d.name, location: d.location, transport: d.transport })));
+    save('devices', devices.map((d) => ({ id: d.id, name: d.name, location: d.location, transport: d.transport, plant: d.plant })));
   }, [deviceSig]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const login = useCallback((email) => {
@@ -91,6 +91,10 @@ export function AppProvider({ children }) {
     const id = 'node-' + Math.random().toString(36).slice(2, 6);
     setDevices((ds) => [...ds, buildDevice({ id, name, location, transport })]);
     setSelectedDeviceId(id);
+  }, []);
+
+  const setDevicePlant = useCallback((id, plant) => {
+    setDevices((ds) => ds.map((d) => (d.id === id ? { ...d, plant } : d)));
   }, []);
 
   const updateAlarmRule = useCallback((id, patch) => {
@@ -109,7 +113,7 @@ export function AppProvider({ children }) {
 
   const value = {
     user, login, logout,
-    devices, selectedDevice, selectedDeviceId, setSelectedDeviceId, addDevice,
+    devices, selectedDevice, selectedDeviceId, setSelectedDeviceId, addDevice, setDevicePlant,
     alarmRules, addAlarmRule, updateAlarmRule, removeAlarmRule,
     settings, updateSettings,
   };

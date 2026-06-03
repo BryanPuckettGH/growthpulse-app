@@ -371,3 +371,34 @@ input[type='range'].slider::-moz-range-thumb {
 :root[data-theme='dark'] .tab.active { background: #15271c; }
 :root[data-theme='dark'] .input { background: var(--card-2); }
 :root[data-theme='dark'] .login { background: radial-gradient(120% 80% at 50% -10%, #103420 0%, var(--bg) 55%); }
+
+/* ---------- Plant profile bar + picker ---------- */
+.plantbar {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  background: var(--card); border: none; border-radius: var(--radius);
+  box-shadow: var(--shadow-soft); padding: 13px 16px; margin-bottom: 14px;
+  cursor: pointer; font: inherit; color: inherit; text-align: left;
+  transition: transform 0.12s ease;
+}
+.plantbar:active { transform: scale(0.99); }
+.plantbar__emoji { font-size: 26px; line-height: 1; }
+.plantbar__txt { display: flex; flex-direction: column; }
+.plantbar__label { font-size: 11px; color: var(--ink-3); }
+.plantbar__name { font-size: 16px; font-weight: 700; }
+.plantbar__range { margin-left: auto; font-size: 12px; color: var(--ink-3); }
+.plantgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 6px; }
+.plantopt {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 14px 6px; border-radius: 14px; border: 2px solid var(--line);
+  background: var(--card); cursor: pointer; font-size: 12.5px; font-weight: 700; color: var(--ink-2);
+}
+.plantopt.active { border-color: var(--green); color: var(--ink); }
+.plantopt__emoji { font-size: 24px; line-height: 1; }
+
+/* ---------- Weather note + loading shimmer ---------- */
+.weather-note { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 10px 12px; border-radius: 12px; font-size: 13px; font-weight: 600; }
+.weather-note--rain { background: #13a4ff1a; color: #1184d6; }
+.weather-note--sun { background: #f4a52b1a; color: #b9780f; }
+.skeleton { background: var(--card-2); border-radius: 12px; position: relative; overflow: hidden; }
+.skeleton::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.08), transparent); animation: shimmer 1.4s infinite; }
+@keyframes shimmer { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
