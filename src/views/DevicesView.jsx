@@ -32,8 +32,8 @@ export default function DevicesView() {
               </div>
             </div>
             <div className="device__reading">
-              <div className="device__big">{d.reading.soilMoisturePercent}%</div>
-              <div className="device__small">moisture</div>
+              <div className="device__big">{d.hasData ? `${d.reading.soilMoisturePercent}%` : '—'}</div>
+              <div className="device__small">{d.hasData ? 'moisture' : 'connecting'}</div>
             </div>
             <button className="device__edit" onClick={(e) => { e.stopPropagation(); setEditId(d.id); }} aria-label="Edit device"><Pencil size={16} /></button>
           </div>

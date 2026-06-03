@@ -34,6 +34,22 @@ function LockedWeather({ onUpgrade }) {
   );
 }
 
+function DeviceWaiting({ device }) {
+  return (
+    <div className="card" style={{ textAlign: 'center', padding: '34px 18px' }}>
+      <img src="/growthpulse-icon.svg" alt="" style={{ width: 56, height: 56, margin: '0 auto 12px', display: 'block', opacity: 0.85 }} />
+      <div style={{ fontWeight: 700, fontSize: 18 }}>{device.name}</div>
+      <p className="muted" style={{ marginTop: 6 }}>
+        Waiting for the first reading. Make sure your device is powered on and connected to Wi-Fi.
+        Readings appear here automatically once it reports in.
+      </p>
+      <div className="device__meta" style={{ justifyContent: 'center', marginTop: 8 }}>
+        <span className="dot" style={{ background: '#cfd3d8', marginRight: 6 }} />Offline
+      </div>
+    </div>
+  );
+}
+
 function LockedIrrigation({ onUpgrade }) {
   return (
     <div className="card" style={{ textAlign: 'center' }}>
@@ -84,6 +100,8 @@ export default function LiveView() {
   const plant = PLANTS[selectedDevice.plant] || PLANTS.generic;
   const [detailKey, setDetailKey] = useState(null);
   const [plantOpen, setPlantOpen] = useState(false);
+
+  if (!selectedDevice.hasData) return <DeviceWaiting device={selectedDevice} />;
 
   return (
     <div>

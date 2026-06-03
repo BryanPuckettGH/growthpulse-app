@@ -40,14 +40,23 @@ const STARTER_DEVICES = [
   { id: 'node-03', name: 'Lab Bench', location: 'Lab', transport: 'ethernet', plant: 'aloe-vera' },
 ];
 
+const EMPTY_READING = { airTemperatureF: null, airHumidity: null, soilTemperatureF: null, soilRaw: null, soilMoisturePercent: null, time: 0 };
+
 function buildDevice(d) {
-  const r = seedReading();
+  // Claimed real devices start with NO data and stay offline until the cloud
+  // actually reports a reading. Only demo/sample devices get simulated values.
+  const claimed = !!d.losantDeviceId;
+  const r = claimed ? { ...EMPTY_READING } : seedReading();
   return {
     ...d,
     plant: d.plant || 'generic',
     irrigation: d.irrigation || { mode: 'manual', targetMoisture: 35, durationSec: 5, enabled: false },
     pumpRunning: false,
-    online: true, reading: r, history: [r], lastSeen: r.time,
+    hasData: !claimed,
+    online: !claimed,
+    reading: r,
+    history: claimed ? [] : [r],
+    lastSeen: claimed ? 0 : r.time,
   };
 }
 
@@ -104,7 +113,7 @@ export function AppProvider({ children }) {
             const u = updates[d.id];
             if (!u) return d;
             const reading = { ...d.reading, ...u };
-            return { ...d, reading, history: [...d.history, reading].slice(-60), lastSeen: u.time || Date.now(), online: true };
+            return { ...d, reading, history: [...d.history, reading].slice(-60), lastSeen: u.time || Date.now(), online: true, hasData: true };
           }
           const r = nextReading(d.reading);
           return { ...d, reading: r, history: [...d.history, r].slice(-60), lastSeen: r.time };
