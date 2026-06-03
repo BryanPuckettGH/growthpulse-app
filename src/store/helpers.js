@@ -20,6 +20,8 @@ export const METRICS = {
   airHumidity: { key: 'airHumidity', label: 'Humidity', short: 'Humidity', unit: '%', icon: 'humidity', good: [40, 65], warn: [30, 75], min: 0, max: 100, color: '#13a4ff' },
   soilMoisturePercent: { key: 'soilMoisturePercent', label: 'Soil Moisture', short: 'Moisture', unit: '%', icon: 'moisture', good: [40, 80], warn: [25, 90], min: 0, max: 100, color: '#2ecc71' },
   soilTemperatureF: { key: 'soilTemperatureF', label: 'Soil Temp', short: 'Soil Temp', unit: '°F', icon: 'soil', good: [62, 75], warn: [55, 82], min: 40, max: 95, color: '#a06bff' },
+  // Not a device sensor: rain comes from the weather forecast, used only for rain alarms.
+  rainChance: { key: 'rainChance', label: 'Rain chance', short: 'Rain', unit: '%', icon: 'rain', good: [0, 100], warn: [0, 100], min: 0, max: 100, color: '#13a4ff' },
 };
 
 export const METRIC_ORDER = ['airTemperatureF', 'airHumidity', 'soilMoisturePercent', 'soilTemperatureF'];
@@ -145,11 +147,21 @@ export function buildSeries(key, range, good) {
 }
 
 // Which configured alarm rules are currently tripped
-export function activeAlerts(devices, rules) {
+export function activeAlerts(devices, rules, weather) {
   const out = [];
-  for (const d of devices) {
-    for (const r of rules) {
-      if (!r.enabled) continue;
+  for (const r of rules) {
+    if (!r.enabled) continue;
+
+    // Rain alarms evaluate once against the shared forecast, not per device.
+    if (r.metric === 'rainChance') {
+      const v = weather && weather.rainChance;
+      if (v == null) continue;
+      const hit = r.op === 'below' ? v < r.value : v > r.value;
+      if (hit) out.push({ device: null, rule: r, value: v });
+      continue;
+    }
+
+    for (const d of devices) {
       if (r.deviceId && r.deviceId !== 'all' && r.deviceId !== d.id) continue;
       const v = d.reading[r.metric];
       if (v == null) continue;

@@ -47,6 +47,31 @@ function LockedIrrigation({ onUpgrade }) {
   );
 }
 
+// When rain is likely, offer to pause automatic watering so the plant isn't overwatered.
+function RainPausePrompt() {
+  const { selectedDevice, weather, tier, setIrrigation } = useApp();
+  const [dismissed, setDismissed] = useState(false);
+  const irr = selectedDevice.irrigation || {};
+  const paused = irr.pausedUntil && irr.pausedUntil > Date.now();
+  const rainy = weather && weather.rainChance >= 50;
+
+  if (!tier.irrigation || !rainy || paused || dismissed) return null;
+
+  const pause = (hours) => setIrrigation(selectedDevice.id, { pausedUntil: Date.now() + hours * 3600 * 1000 });
+
+  return (
+    <div className="card rainprompt">
+      <div className="rainprompt__head"><CloudRain size={20} color="#13a4ff" /><b>Rain expected today</b></div>
+      <p className="muted" style={{ margin: '4px 0 12px' }}>{weather.rainChance}% chance of rain. Pause automatic watering so you don't overwater?</p>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button className="btn btn--blue" onClick={() => pause(24)}>Pause 24h</button>
+        <button className="btn btn--blue" onClick={() => pause(48)}>Pause 48h</button>
+        <button className="btn btn--ghost" style={{ width: 'auto', padding: '0 16px' }} onClick={() => setDismissed(true)}>Not now</button>
+      </div>
+    </div>
+  );
+}
+
 export default function LiveView() {
   const { selectedDevice, settings, setDevicePlant, tier, openPlans } = useApp();
   const r = selectedDevice.reading;
@@ -62,6 +87,7 @@ export default function LiveView() {
 
   return (
     <div>
+      <RainPausePrompt />
       <button className="plantbar" onClick={() => setPlantOpen(true)}>
         <span className="plantbar__emoji">{plant.emoji}</span>
         <span className="plantbar__txt">

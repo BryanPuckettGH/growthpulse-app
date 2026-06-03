@@ -1,6 +1,6 @@
 import { useApp } from '../store/AppContext';
 import { Pills, Slider, Stepper, Toggle } from './UI';
-import { Droplet } from 'lucide-react';
+import { Droplet, CloudRain } from 'lucide-react';
 
 // Watering control, modeled on a grow-controller's Control tab. Drives the
 // relay + pump from the irrigation kit. Demo runs a simulated pump; real
@@ -10,6 +10,7 @@ export default function IrrigationCard() {
   const irr = selectedDevice.irrigation || { mode: 'manual', targetMoisture: 35, durationSec: 5, enabled: false };
   const running = selectedDevice.pumpRunning;
   const moisture = selectedDevice.reading.soilMoisturePercent;
+  const paused = irr.pausedUntil && irr.pausedUntil > Date.now();
 
   const set = (patch) => setIrrigation(selectedDevice.id, patch);
 
@@ -17,6 +18,12 @@ export default function IrrigationCard() {
     <>
       <div className="section-title">Watering</div>
       <div className="card">
+        {paused && (
+          <div className="weather-note weather-note--rain" style={{ marginTop: 0, marginBottom: 14 }}>
+            <CloudRain size={15} /> Watering paused until {new Date(irr.pausedUntil).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}
+            <button onClick={() => set({ pausedUntil: null })} style={{ marginLeft: 'auto', border: 'none', background: 'none', color: 'var(--blue)', fontWeight: 700, cursor: 'pointer' }}>Resume</button>
+          </div>
+        )}
         <div className="field__row" style={{ marginBottom: 14 }}>
           <div>
             <div className="field__label">{running ? 'Watering now' : irr.enabled && irr.mode === 'auto' ? 'Auto running' : 'Manual'}</div>

@@ -67,6 +67,7 @@ export function AppProvider({ children }) {
   const [tierId, setTierId] = useState(() => load('tier', 'free'));
   const [showPlans, setShowPlans] = useState(false);
   const [journals, setJournals] = useState(() => load('journals', {}));
+  const [weather, setWeather] = useState(null);
 
   // Live simulation: advance every device's reading every 2 seconds.
   useEffect(() => {
@@ -88,6 +89,40 @@ export function AppProvider({ children }) {
   useEffect(() => save('settings', settings), [settings]);
   useEffect(() => save('tier', tierId), [tierId]);
   useEffect(() => save('journals', journals), [journals]);
+
+  // Shared weather (virtual rain gauge), used by the weather card and rain alarms.
+  useEffect(() => {
+    let cancelled = false;
+    const unit = settings.units === 'C' ? 'celsius' : 'fahrenheit';
+    const fetchFor = (lat, lon, label) => {
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code&daily=precipitation_probability_max,temperature_2m_max,uv_index_max&temperature_unit=${unit}&timezone=auto&forecast_days=1`;
+      fetch(url)
+        .then((r) => r.json())
+        .then((d) => {
+          if (cancelled) return;
+          setWeather({
+            label,
+            temp: Math.round(d.current.temperature_2m),
+            code: d.current.weather_code,
+            rainChance: d.daily.precipitation_probability_max?.[0] ?? 0,
+            uv: d.daily.uv_index_max?.[0] ?? 0,
+            high: Math.round(d.daily.temperature_2m_max?.[0] ?? 0),
+          });
+        })
+        .catch(() => { if (!cancelled) setWeather({ error: true }); });
+    };
+    const DEF = { lat: 25.7617, lon: -80.1918, label: 'Miami, FL' };
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => fetchFor(pos.coords.latitude, pos.coords.longitude, 'Your location'),
+        () => fetchFor(DEF.lat, DEF.lon, DEF.label),
+        { timeout: 5000 }
+      );
+    } else {
+      fetchFor(DEF.lat, DEF.lon, DEF.label);
+    }
+    return () => { cancelled = true; };
+  }, [settings.units]);
   const deviceSig = devices.map((d) => `${d.id}|${d.name}|${d.location}|${d.transport}|${d.plant}|${JSON.stringify(d.irrigation)}`).join(',');
   useEffect(() => {
     save('devices', devices.map((d) => ({ id: d.id, name: d.name, location: d.location, transport: d.transport, plant: d.plant, irrigation: d.irrigation })));
@@ -168,7 +203,7 @@ export function AppProvider({ children }) {
     alarmRules, addAlarmRule, addAlarmRules, updateAlarmRule, removeAlarmRule,
     settings, updateSettings,
     tier: TIERS[tierId] || TIERS.free, tierId, setTier, showPlans, openPlans, closePlans,
-    journals, addJournalEntry, removeJournalEntry,
+    journals, addJournalEntry, removeJournalEntry, weather,
   };
 
   return <AppCtx.Provider value={value}>{children}</AppCtx.Provider>;
