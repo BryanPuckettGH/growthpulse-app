@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useEffect, useCallback, useRef } f
 import { seedReading, nextReading } from './helpers';
 import { TIERS } from './tiers';
 import { useAuth } from '../auth/AuthProvider';
+import { supabase } from '../supabaseClient';
 
 /* ============================================================
    AppContext
@@ -175,10 +176,22 @@ export function AppProvider({ children }) {
     setSelectedDeviceId(id);
   }, []);
 
-  const claimDevice = useCallback((losantDeviceId, name) => {
+  // Claim a real device by its short pairing code. Looks the code up in the
+  // device registry; only a code that maps to a real unit is accepted.
+  const claimDevice = useCallback(async (code, name) => {
+    const claimCode = (code || '').trim().toUpperCase();
+    if (!claimCode) return 'Enter the pairing code from your device.';
+    if (!supabase) return 'Accounts service unavailable.';
+    const { data, error } = await supabase
+      .from('device_registry')
+      .select('losant_device_id')
+      .eq('claim_code', claimCode)
+      .maybeSingle();
+    if (error || !data) return 'That pairing code wasn’t recognized. Double-check the code on your unit.';
     const id = 'node-' + Math.random().toString(36).slice(2, 6);
-    setDevices((ds) => [...ds, buildDevice({ id, name: name || 'My Plant', location: '', transport: 'wifi', plant: 'generic', losantDeviceId })]);
+    setDevices((ds) => [...ds, buildDevice({ id, name: name || 'My Plant', location: '', transport: 'wifi', plant: 'generic', losantDeviceId: data.losant_device_id })]);
     setSelectedDeviceId(id);
+    return null;
   }, []);
 
   const setDevicePlant = useCallback((id, plant) => {
