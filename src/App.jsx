@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { AppProvider, useApp } from './store/AppContext';
+import { AuthProvider, useAuth } from './auth/AuthProvider';
 import Login from './components/Login';
 import LiveView from './views/LiveView';
 import HistoryView from './views/HistoryView';
@@ -18,7 +19,6 @@ const TABS = [
   { id: 'settings', label: 'Settings', icon: Settings, View: SettingsView },
 ];
 
-// Apply the chosen theme (light / dark / auto) to the root element.
 function useTheme(theme) {
   useEffect(() => {
     const root = document.documentElement;
@@ -47,9 +47,8 @@ function Shell() {
 
   const alerts = activeAlerts(devices, alarmRules);
   const alertCount = alerts.length;
-  const alertKey = alerts.map((a) => a.device.id + ':' + a.rule.id).sort().join(',');
+  const alertKey = alerts.map((a) => (a.device ? a.device.id : 'weather') + ':' + a.rule.id).sort().join(',');
 
-  // Toast when a new alarm trips (skip the very first run so we don't toast on load).
   useEffect(() => {
     const keys = new Set(alertKey ? alertKey.split(',') : []);
     if (!initialized.current) { prevKeys.current = keys; initialized.current = true; return; }
@@ -57,10 +56,10 @@ function Shell() {
     keys.forEach((k) => { if (!prevKeys.current.has(k)) appeared = k; });
     prevKeys.current = keys;
     if (appeared) {
-      const a = alerts.find((x) => x.device.id + ':' + x.rule.id === appeared);
+      const a = alerts.find((x) => (x.device ? x.device.id : 'weather') + ':' + x.rule.id === appeared);
       if (a) {
         const m = METRICS[a.rule.metric];
-        setToast(`${a.device.name}: ${m.label} ${a.rule.op} ${a.rule.value}${m.unit}`);
+        setToast(`${a.device ? a.device.name : 'Weather'}: ${m.label} ${a.rule.op} ${a.rule.value}${m.unit}`);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -71,8 +70,6 @@ function Shell() {
     const t = setTimeout(() => setToast(null), 4000);
     return () => clearTimeout(t);
   }, [toast]);
-
-  if (!user) return <Login />;
 
   const ActiveView = TABS.find((t) => t.id === tab).View;
 
@@ -120,10 +117,35 @@ function Shell() {
   );
 }
 
-export default function App() {
+// Decides what to show based on auth state.
+function Gate() {
+  const { user, authReady, configured } = useAuth();
+
+  if (!configured) {
+    return (
+      <div className="login">
+        <div className="card center" style={{ maxWidth: 380, margin: '0 auto' }}>
+          <p className="muted">GrowthPulse isn't connected to its accounts service yet. Add your Supabase URL and anon key, then reload.</p>
+        </div>
+      </div>
+    );
+  }
+  if (!authReady) {
+    return <div style={{ padding: 80, textAlign: 'center' }} className="muted">Loading...</div>;
+  }
+  if (!user) return <Login />;
+
   return (
-    <AppProvider>
+    <AppProvider key={user.id}>
       <Shell />
     </AppProvider>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <Gate />
+    </AuthProvider>
   );
 }

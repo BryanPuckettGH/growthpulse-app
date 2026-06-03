@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { seedReading, nextReading } from './helpers';
 import { TIERS } from './tiers';
+import { useAuth } from '../auth/AuthProvider';
 
 /* ============================================================
    AppContext
@@ -15,9 +16,11 @@ export const useApp = () => useContext(AppCtx);
 
 // --- tiny localStorage persistence so settings survive a refresh ---
 const KEY = 'growthpulse';
+// Set per logged-in user so each account's saved data is kept separate.
+let STORAGE_PREFIX = 'anon';
 function load(name, fallback) {
   try {
-    const raw = localStorage.getItem(`${KEY}:${name}`);
+    const raw = localStorage.getItem(`${KEY}:${STORAGE_PREFIX}:${name}`);
     return raw ? JSON.parse(raw) : fallback;
   } catch {
     return fallback;
@@ -25,7 +28,7 @@ function load(name, fallback) {
 }
 function save(name, value) {
   try {
-    localStorage.setItem(`${KEY}:${name}`, JSON.stringify(value));
+    localStorage.setItem(`${KEY}:${STORAGE_PREFIX}:${name}`, JSON.stringify(value));
   } catch {
     // storage unavailable, ignore
   }
@@ -55,7 +58,8 @@ const DEFAULT_ALARMS = [
 ];
 
 export function AppProvider({ children }) {
-  const [user, setUser] = useState(() => load('user', null));
+  const { user, logout } = useAuth();
+  STORAGE_PREFIX = user.id; // each account's data is namespaced by user id
   const [devices, setDevices] = useState(() => {
     const saved = load('devices', null);
     const base = saved && saved.length ? saved : STARTER_DEVICES;
@@ -83,7 +87,6 @@ export function AppProvider({ children }) {
   }, [settings.refreshMs]);
 
   // Persist settings whenever they change, so nothing resets on refresh.
-  useEffect(() => save('user', user), [user]);
   useEffect(() => save('alarmRules', alarmRules), [alarmRules]);
   useEffect(() => save('selectedDeviceId', selectedDeviceId), [selectedDeviceId]);
   useEffect(() => save('settings', settings), [settings]);
@@ -127,12 +130,6 @@ export function AppProvider({ children }) {
   useEffect(() => {
     save('devices', devices.map((d) => ({ id: d.id, name: d.name, location: d.location, transport: d.transport, plant: d.plant, irrigation: d.irrigation })));
   }, [deviceSig]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const login = useCallback((email) => {
-    const name = (email || 'demo@growthpulse.io').split('@')[0];
-    setUser({ email: email || 'demo@growthpulse.io', name });
-  }, []);
-  const logout = useCallback(() => setUser(null), []);
 
   const addDevice = useCallback((name, location, transport) => {
     const id = 'node-' + Math.random().toString(36).slice(2, 6);
@@ -198,7 +195,7 @@ export function AppProvider({ children }) {
   const selectedDevice = devices.find((d) => d.id === selectedDeviceId) || devices[0];
 
   const value = {
-    user, login, logout,
+    user: { id: user.id, email: user.email, name: (user.email || 'user').split('@')[0] }, logout,
     devices, selectedDevice, selectedDeviceId, setSelectedDeviceId, addDevice, setDevicePlant, updateDevice, removeDevice, setIrrigation, runPump,
     alarmRules, addAlarmRule, addAlarmRules, updateAlarmRule, removeAlarmRule,
     settings, updateSettings,

@@ -1,12 +1,24 @@
 import { useState } from 'react';
-import { useApp } from '../store/AppContext';
+import { useAuth } from '../auth/AuthProvider';
 
-// Branded sign-in screen. The wordmark is composed from the icon + text so it
-// adapts to light and dark themes (the flat logo SVG has a fixed navy wordmark).
+// Real sign-in / sign-up using Supabase auth.
 export default function Login() {
-  const { login } = useApp();
+  const { login, signup } = useAuth();
+  const [mode, setMode] = useState('login'); // 'login' | 'signup'
   const [email, setEmail] = useState('');
-  const [pass, setPass] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    if (!email || !password) { setError('Enter your email and password.'); return; }
+    setBusy(true);
+    setError('');
+    const err = mode === 'login' ? await login(email, password) : await signup(email, password);
+    setBusy(false);
+    if (err) setError(err);
+    // On success the auth state changes and the app loads automatically.
+  };
 
   return (
     <div className="login">
@@ -17,15 +29,22 @@ export default function Login() {
       </div>
 
       <div className="card">
-        <input className="input" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
-        <input className="input" type="password" placeholder="Password" value={pass} onChange={(e) => setPass(e.target.value)} />
-        <button className="btn btn--green" onClick={() => login(email)}>Sign in</button>
+        <input className="input" type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
+        <input className="input" type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') submit(); }} />
+
+        {error && <p className="center" style={{ color: 'var(--red)', fontSize: 13, margin: '0 0 10px' }}>{error}</p>}
+
+        <button className="btn btn--green" disabled={busy} onClick={submit}>
+          {busy ? 'Please wait...' : mode === 'login' ? 'Sign in' : 'Create account'}
+        </button>
+
         <p className="muted center" style={{ marginTop: 14 }}>
-          Demo mode. Use any email, or{' '}
-          <span style={{ color: 'var(--green-d)', fontWeight: 700, cursor: 'pointer' }} onClick={() => login('demo@growthpulse.io')}>
-            continue as demo
+          {mode === 'login' ? 'New to GrowthPulse? ' : 'Already have an account? '}
+          <span style={{ color: 'var(--green-d)', fontWeight: 700, cursor: 'pointer' }}
+            onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setError(''); }}>
+            {mode === 'login' ? 'Create an account' : 'Sign in'}
           </span>
-          .
         </p>
       </div>
     </div>
