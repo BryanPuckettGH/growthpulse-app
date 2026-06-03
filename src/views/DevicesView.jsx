@@ -4,11 +4,12 @@ import { TRANSPORTS } from '../store/helpers';
 import { TransportIcon } from '../components/UI';
 import { Plus, Sprout, Lock, Pencil, Trash2 } from 'lucide-react';
 import AddDeviceSheet from '../components/AddDeviceSheet';
+import ClaimDeviceSheet from '../components/ClaimDeviceSheet';
 
 // List of all devices (tap to select) plus an add-device sheet that lets
 // you pick the connection type: Wi-Fi, LoRaWAN, or Ethernet.
 export default function DevicesView() {
-  const { devices, selectedDeviceId, setSelectedDeviceId, addDevice, tier, openPlans } = useApp();
+  const { devices, selectedDeviceId, setSelectedDeviceId, addDevice, claimDevice, tier, openPlans, isDemo } = useApp();
   const [open, setOpen] = useState(false);
   const [editId, setEditId] = useState(null);
   const atLimit = devices.length >= tier.deviceLimit;
@@ -50,7 +51,9 @@ export default function DevicesView() {
         </button>
       )}
 
-      {open && <AddDeviceSheet onClose={() => setOpen(false)} onAdd={addDevice} />}
+      {open && (isDemo
+        ? <AddDeviceSheet onClose={() => setOpen(false)} onAdd={addDevice} />
+        : <ClaimDeviceSheet onClose={() => setOpen(false)} onClaim={claimDevice} />)}
       {editId && devices.find((d) => d.id === editId) && (
         <DeviceEditSheet device={devices.find((d) => d.id === editId)} onClose={() => setEditId(null)} />
       )}

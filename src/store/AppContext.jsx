@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { seedReading, nextReading } from './helpers';
 import { TIERS } from './tiers';
 import { useAuth } from '../auth/AuthProvider';
@@ -75,17 +75,44 @@ export function AppProvider({ children }) {
   const [journals, setJournals] = useState(() => load('journals', {}));
   const [weather, setWeather] = useState(null);
 
-  // Live simulation: advance every device's reading every 2 seconds.
+  // Live ref so the polling loop always sees the latest device list.
+  const devicesRef = useRef(devices);
+  devicesRef.current = devices;
+
+  // Live loop: claimed devices (with a losantDeviceId) pull REAL readings from
+  // the cloud connector; demo/sample devices advance simulated readings.
   useEffect(() => {
-    const id = setInterval(() => {
+    let cancelled = false;
+    const tick = async () => {
+      const claimed = devicesRef.current.filter((d) => d.losantDeviceId);
+      const updates = {};
+      await Promise.all(claimed.map(async (d) => {
+        try {
+          const res = await fetch(`/.netlify/functions/device-state?deviceId=${encodeURIComponent(d.losantDeviceId)}`);
+          if (res.ok) {
+            const r = await res.json();
+            if (r && r.soilMoisturePercent != null) updates[d.id] = r;
+          }
+        } catch {
+          // ignore; keep the last reading
+        }
+      }));
+      if (cancelled) return;
       setDevices((ds) =>
         ds.map((d) => {
+          if (d.losantDeviceId) {
+            const u = updates[d.id];
+            if (!u) return d;
+            const reading = { ...d.reading, ...u };
+            return { ...d, reading, history: [...d.history, reading].slice(-60), lastSeen: u.time || Date.now(), online: true };
+          }
           const r = nextReading(d.reading);
           return { ...d, reading: r, history: [...d.history, r].slice(-60), lastSeen: r.time };
         })
       );
-    }, settings.refreshMs);
-    return () => clearInterval(id);
+    };
+    const id = setInterval(tick, settings.refreshMs);
+    return () => { cancelled = true; clearInterval(id); };
   }, [settings.refreshMs]);
 
   // Persist settings whenever they change, so nothing resets on refresh.
@@ -128,14 +155,20 @@ export function AppProvider({ children }) {
     }
     return () => { cancelled = true; };
   }, [settings.units]);
-  const deviceSig = devices.map((d) => `${d.id}|${d.name}|${d.location}|${d.transport}|${d.plant}|${JSON.stringify(d.irrigation)}`).join(',');
+  const deviceSig = devices.map((d) => `${d.id}|${d.name}|${d.location}|${d.transport}|${d.plant}|${JSON.stringify(d.irrigation)}|${d.losantDeviceId || ''}`).join(',');
   useEffect(() => {
-    save('devices', devices.map((d) => ({ id: d.id, name: d.name, location: d.location, transport: d.transport, plant: d.plant, irrigation: d.irrigation })));
+    save('devices', devices.map((d) => ({ id: d.id, name: d.name, location: d.location, transport: d.transport, plant: d.plant, irrigation: d.irrigation, losantDeviceId: d.losantDeviceId })));
   }, [deviceSig]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const addDevice = useCallback((name, location, transport) => {
     const id = 'node-' + Math.random().toString(36).slice(2, 6);
     setDevices((ds) => [...ds, buildDevice({ id, name, location, transport })]);
+    setSelectedDeviceId(id);
+  }, []);
+
+  const claimDevice = useCallback((losantDeviceId, name) => {
+    const id = 'node-' + Math.random().toString(36).slice(2, 6);
+    setDevices((ds) => [...ds, buildDevice({ id, name: name || 'My Plant', location: '', transport: 'wifi', plant: 'generic', losantDeviceId })]);
     setSelectedDeviceId(id);
   }, []);
 
@@ -198,7 +231,7 @@ export function AppProvider({ children }) {
 
   const value = {
     user: { id: user.id, email: user.email, name: (user.email || 'user').split('@')[0] }, logout,
-    devices, selectedDevice, selectedDeviceId, setSelectedDeviceId, addDevice, setDevicePlant, updateDevice, removeDevice, setIrrigation, runPump,
+    devices, selectedDevice, selectedDeviceId, setSelectedDeviceId, addDevice, claimDevice, setDevicePlant, updateDevice, removeDevice, setIrrigation, runPump, isDemo,
     alarmRules, addAlarmRule, addAlarmRules, updateAlarmRule, removeAlarmRule,
     settings, updateSettings,
     tier: TIERS[tierId] || TIERS.free, tierId, setTier, showPlans, openPlans, closePlans,
