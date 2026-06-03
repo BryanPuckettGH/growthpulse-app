@@ -10,7 +10,10 @@ export default function Onboarding() {
   const [open, setOpen] = useState(false);
 
   return (
-    <div className="shell">
+    // Uses the login wrapper (full-viewport, centered) rather than the app
+    // shell: on desktop the shell becomes a sidebar grid and would squeeze
+    // this screen into the 240px sidebar column.
+    <div className="login">
       <div className="onboard">
         <img className="onboard__icon" src="/growthpulse-icon.svg" alt="" />
         <h2 className="onboard__title">Welcome to GrowthPulse</h2>

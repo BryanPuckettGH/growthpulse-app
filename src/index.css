@@ -451,7 +451,7 @@ input[type='range'].slider::-moz-range-thumb {
 .rainprompt__head { display: flex; align-items: center; gap: 8px; font-size: 15px; }
 
 /* ---------- Onboarding (empty account) ---------- */
-.onboard { max-width: 360px; margin: 0 auto; padding: 24px; min-height: 100vh; display: flex; flex-direction: column; justify-content: center; text-align: center; }
+.onboard { width: 100%; max-width: 360px; margin: 0 auto; text-align: center; }
 .onboard__icon { width: 84px; height: 84px; margin: 0 auto 12px; }
 .onboard__title { font-size: 24px; margin: 4px 0 8px; }
 

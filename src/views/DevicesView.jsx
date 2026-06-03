@@ -64,7 +64,7 @@ export default function DevicesView() {
 }
 
 function DeviceEditSheet({ device, onClose }) {
-  const { updateDevice, removeDevice } = useApp();
+  const { updateDevice, removeDevice, factoryResetDevice } = useApp();
   const [name, setName] = useState(device.name);
   const [location, setLocation] = useState(device.location);
   const [transport, setTransport] = useState(device.transport);
@@ -87,7 +87,16 @@ function DeviceEditSheet({ device, onClose }) {
     onClose();
   };
 
-  const destroy = () => { removeDevice(device.id); onClose(); };
+  const destroy = async () => {
+    if (confirm === 'reset') {
+      setBusy(true);
+      await factoryResetDevice(device.id); // sends the wipe command, then removes
+      setBusy(false);
+    } else {
+      removeDevice(device.id);
+    }
+    onClose();
+  };
 
   // Confirmation step with the data-loss disclaimer.
   if (confirm) {
@@ -101,13 +110,15 @@ function DeviceEditSheet({ device, onClose }) {
             <AlertTriangle size={18} color="var(--red)" />
             <div>
               {reset ? (
-                <>This permanently deletes everything tied to <b>{device.name}</b> from your account: live history, journal photos, and alarms. The new owner sets it up fresh, they hold the PRG button for 3 seconds to clear your Wi-Fi, then pair it to their own account with the code on its screen. If you ever reconnect this unit, you'll be starting from scratch.</>
+                <>This permanently deletes everything tied to <b>{device.name}</b> from your account: live history, journal photos, and alarms. If the unit is online, it also wipes its own Wi-Fi right now and reboots into setup mode, ready for the new owner to pair with the code on its screen. (If it's offline, they can hold the PRG button for 3 seconds instead.) If you ever reconnect this unit, you'll be starting from scratch.</>
               ) : (
                 <><b>{device.name}</b> will be removed from your account, and its history, journal photos, and alarms are deleted. The unit itself keeps working, you can pair it again any time with the code on its screen.</>
               )}
             </div>
           </div>
-          <button className="btn btn--danger" onClick={destroy}>{reset ? 'Delete data & unpair' : 'Remove device'}</button>
+          <button className="btn btn--danger" disabled={busy} onClick={destroy}>
+            {busy ? 'Sending reset...' : reset ? 'Delete data & unpair' : 'Remove device'}
+          </button>
           <button className="btn btn--ghost" style={{ marginTop: 10 }} onClick={() => setConfirm(null)}>Cancel</button>
         </div>
       </div>

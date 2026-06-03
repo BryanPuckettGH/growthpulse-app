@@ -232,6 +232,22 @@ export function AppProvider({ children }) {
     setAlarmRules((rs) => rs.filter((r) => r.deviceId !== id));
   }, []);
 
+  // Factory reset for resale: tell the unit (via the cloud) to wipe its own
+  // Wi-Fi and reboot into setup mode, then remove it from this account.
+  // If the unit is offline the command is lost, the new owner can still
+  // hold PRG for 3 seconds as the manual fallback.
+  const factoryResetDevice = useCallback(async (id) => {
+    const d = devicesRef.current.find((x) => x.id === id);
+    if (d && d.losantDeviceId) {
+      try {
+        await fetch(`/.netlify/functions/device-command?deviceId=${encodeURIComponent(d.losantDeviceId)}&name=factoryReset`, { method: 'POST' });
+      } catch {
+        // unreachable; manual PRG fallback still works
+      }
+    }
+    removeDevice(id);
+  }, [removeDevice]);
+
   const setIrrigation = useCallback((id, patch) => {
     setDevices((ds) => ds.map((d) => (d.id === id ? { ...d, irrigation: { ...d.irrigation, ...patch } } : d)));
   }, []);
@@ -286,7 +302,7 @@ export function AppProvider({ children }) {
 
   const value = {
     user: { id: user.id, email: user.email, name: displayName, growerType: meta.grower_type || '' }, logout,
-    devices, selectedDevice, selectedDeviceId, setSelectedDeviceId, addDevice, claimDevice, setDevicePlant, updateDevice, removeDevice, setIrrigation, runPump, isDemo,
+    devices, selectedDevice, selectedDeviceId, setSelectedDeviceId, addDevice, claimDevice, setDevicePlant, updateDevice, removeDevice, factoryResetDevice, setIrrigation, runPump, isDemo,
     alarmRules, addAlarmRule, addAlarmRules, updateAlarmRule, removeAlarmRule,
     settings, updateSettings,
     tier: TIERS[tierId] || TIERS.free, tierId, setTier, showPlans, openPlans, closePlans,
