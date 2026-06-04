@@ -57,10 +57,27 @@ export function statusOf(key, value, ranges) {
   return 'critical';
 }
 
-// 0-100 overall plant health from the four metrics
+// Whether a sensor is actually plugged in and reporting something sane.
+// Disconnected sensors have telltale signatures: the DS18B20 reports -127C
+// (-196.6F), the DHT22 reports nothing (null), and a floating soil probe
+// reads a near-zero raw value.
+export function metricConnected(key, reading) {
+  if (!reading) return false;
+  const v = reading[key];
+  if (v == null) return false;
+  if (key === 'soilTemperatureF' && v < -100) return false;
+  if (key === 'airHumidity' && v <= 0) return false;
+  if (key === 'airTemperatureF' && v === 0 && (reading.airHumidity == null || reading.airHumidity <= 0)) return false;
+  if (key === 'soilMoisturePercent' && reading.soilRaw != null && reading.soilRaw < 300) return false;
+  return true;
+}
+
+// 0-100 overall plant health, computed only from sensors that are connected.
 export function healthScore(reading, ranges) {
   const weight = { good: 100, warn: 66, critical: 28 };
-  const scores = METRIC_ORDER.map((k) => weight[statusOf(k, reading[k], ranges)]);
+  const present = METRIC_ORDER.filter((k) => metricConnected(k, reading));
+  if (present.length === 0) return 0;
+  const scores = present.map((k) => weight[statusOf(k, reading[k], ranges)]);
   return Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
 }
 
@@ -68,9 +85,20 @@ export function healthScore(reading, ranges) {
 export function recommendations(reading, ranges) {
   const R = ranges || defaultRanges();
   const out = [];
-  const sm = reading.soilMoisturePercent;
-  const t = reading.airTemperatureF;
-  const h = reading.airHumidity;
+
+  // Disconnected sensors come first: tell the user which wire to check.
+  const MISSING = {
+    soilTemperatureF: 'Soil temperature probe not detected. Check the yellow wire on pin 4 and its 4.7k resistor.',
+    airTemperatureF: 'Air sensor (DHT22) not detected. Check its data wire on pin 5.',
+    soilMoisturePercent: 'Soil moisture probe not detected. Check AO on pin 2 and that it has 5V power.',
+  };
+  Object.keys(MISSING).forEach((k) => {
+    if (!metricConnected(k, reading)) out.push({ level: 'warn', text: MISSING[k] });
+  });
+
+  const sm = metricConnected('soilMoisturePercent', reading) ? reading.soilMoisturePercent : null;
+  const t = metricConnected('airTemperatureF', reading) ? reading.airTemperatureF : null;
+  const h = metricConnected('airHumidity', reading) ? reading.airHumidity : null;
 
   if (sm < R.soilMoisturePercent.warn[0])
     out.push({ level: 'critical', text: 'Soil is very dry. Water the plant now.' });

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useApp } from '../store/AppContext';
 import {
   METRICS, PLANTS, statusOf, healthScore, recommendations, rangesForDevice, TRANSPORTS,
-  displayValue, displayUnit, trendOf,
+  displayValue, displayUnit, trendOf, metricConnected,
 } from '../store/helpers';
 import { MetricIcon, TransportIcon, Gauge, statusColor } from '../components/UI';
 import Chart from '../components/Chart';
@@ -120,12 +120,13 @@ export default function LiveView() {
         <div className="hero">
           {HERO.map((k) => {
             const m = METRICS[k];
+            const ok = metricConnected(k, r);
             return (
               <div className="hero__metric" key={k}>
-                <div className="hero__val" style={{ color: statusColor(statusOf(k, r[k], ranges)) }}>
-                  {displayValue(k, r[k], u)}<span className="hero__unit">{displayUnit(m.unit, u)}</span>
+                <div className="hero__val" style={{ color: ok ? statusColor(statusOf(k, r[k], ranges)) : 'var(--ink-3)' }}>
+                  {ok ? <>{displayValue(k, r[k], u)}<span className="hero__unit">{displayUnit(m.unit, u)}</span></> : '—'}
                 </div>
-                <div className="hero__label">{m.label}</div>
+                <div className="hero__label">{m.label}{!ok && ' · not connected'}</div>
               </div>
             );
           })}
@@ -134,7 +135,11 @@ export default function LiveView() {
 
       <div className="card">
         <div className="gaugewrap">
-          <Gauge value={r.soilMoisturePercent} color={statusColor(statusOf('soilMoisturePercent', r.soilMoisturePercent, ranges))} label="Moisture" />
+          <Gauge
+            value={metricConnected('soilMoisturePercent', r) ? r.soilMoisturePercent : 0}
+            color={metricConnected('soilMoisturePercent', r) ? statusColor(statusOf('soilMoisturePercent', r.soilMoisturePercent, ranges)) : '#cfd3d8'}
+            label={metricConnected('soilMoisturePercent', r) ? 'Moisture' : 'No probe'}
+          />
           <div className="gauge__side">
             <div className="healthrow">
               <span className="health__score" style={{ color: healthColor }}>{health}</span>
@@ -157,16 +162,21 @@ export default function LiveView() {
       <div className="chips">
         {CHIPS.map((k) => {
           const m = METRICS[k];
-          const c = statusColor(statusOf(k, r[k], ranges));
+          const ok = metricConnected(k, r);
+          const c = ok ? statusColor(statusOf(k, r[k], ranges)) : '#9aa1aa';
           const trend = trendOf(selectedDevice.history, k);
           return (
-            <button className="chip chip--tap" key={k} onClick={() => setDetailKey(k)}>
+            <button className="chip chip--tap" key={k} onClick={() => ok && setDetailKey(k)} style={ok ? undefined : { cursor: 'default' }}>
               <div className="chip__icon" style={{ background: c + '1a' }}><MetricIcon name={m.icon} color={c} /></div>
               <div className="chip__txt">
                 <div className="chip__label">{m.short}</div>
-                <div className="chip__val">{displayValue(k, r[k], u)}<span className="chip__unit">{displayUnit(m.unit, u)}</span></div>
+                <div className="chip__val">
+                  {ok
+                    ? <>{displayValue(k, r[k], u)}<span className="chip__unit">{displayUnit(m.unit, u)}</span></>
+                    : <span style={{ color: 'var(--ink-3)', fontSize: 13 }}>not connected</span>}
+                </div>
               </div>
-              <span className={`trend trend--${trend}`}><TrendIcon trend={trend} /></span>
+              {ok && <span className={`trend trend--${trend}`}><TrendIcon trend={trend} /></span>}
             </button>
           );
         })}
