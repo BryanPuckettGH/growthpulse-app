@@ -39,7 +39,7 @@ function save(name, value) {
 const STARTER_DEVICES = [
   { id: 'node-01', name: 'Greenhouse Node', location: 'Greenhouse A', transport: 'wifi', plant: 'boston-fern' },
   { id: 'node-02', name: 'Field Sensor', location: 'North Field', transport: 'lorawan', plant: 'tomato' },
-  { id: 'node-03', name: 'Lab Bench', location: 'Lab', transport: 'ethernet', plant: 'aloe-vera' },
+  { id: 'node-03', name: 'Lab Bench', location: 'Lab', transport: 'wifi', plant: 'aloe-vera' },
 ];
 
 const EMPTY_READING = { airTemperatureF: null, airHumidity: null, soilTemperatureF: null, soilRaw: null, soilMoisturePercent: null, time: 0 };
@@ -51,6 +51,8 @@ function buildDevice(d) {
   const r = claimed ? { ...EMPTY_READING } : seedReading();
   return {
     ...d,
+    // Ethernet was retired; normalize any older saved devices to Wi-Fi.
+    transport: d.transport === 'lorawan' ? 'lorawan' : 'wifi',
     plant: d.plant || 'generic',
     irrigation: d.irrigation || { mode: 'manual', targetMoisture: 35, durationSec: 5, enabled: false },
     pumpRunning: false,
@@ -84,6 +86,7 @@ export function AppProvider({ children }) {
   const [tierId, setTierId] = useState(() => load('tier', isDemo ? 'pro' : 'free'));
   const [showPlans, setShowPlans] = useState(false);
   const [journals, setJournals] = useState(() => load('journals', {}));
+  const [gateways, setGateways] = useState(() => load('gateways', []));
   const [weather, setWeather] = useState(null);
 
   // Live ref so the polling loop always sees the latest device list.
@@ -132,6 +135,7 @@ export function AppProvider({ children }) {
   useEffect(() => save('settings', settings), [settings]);
   useEffect(() => save('tier', tierId), [tierId]);
   useEffect(() => save('journals', journals), [journals]);
+  useEffect(() => save('gateways', gateways), [gateways]);
 
   // Shared weather (virtual rain gauge), used by the weather card and rain alarms.
   // Pinned to the selected device's HOME location when it has one, so the
@@ -186,7 +190,7 @@ export function AppProvider({ children }) {
 
   // Claim a real device by its short pairing code. Looks the code up in the
   // device registry; only a code that maps to a real unit is accepted.
-  const claimDevice = useCallback(async (code, name, place) => {
+  const claimDevice = useCallback(async (code, name, place, transport) => {
     const claimCode = (code || '').trim().toUpperCase();
     if (!claimCode) return 'Enter the pairing code from your device.';
     if (!supabase) return 'Accounts service unavailable.';
@@ -204,7 +208,7 @@ export function AppProvider({ children }) {
       id,
       name: name || 'My Plant',
       location: geo ? geo.label : (place || '').trim(),
-      transport: 'wifi',
+      transport: transport === 'lorawan' ? 'lorawan' : 'wifi',
       plant: 'generic',
       losantDeviceId: data.losant_device_id,
       geo: geo || undefined,
@@ -266,6 +270,16 @@ export function AppProvider({ children }) {
     }, Math.min(seconds, 6) * 1000);
   }, []);
 
+  // LoRaWAN gateways: the one piece of Farm Kit hardware that touches the
+  // internet. Nodes join through them automatically; the app just tracks them.
+  const addGateway = useCallback((name, code) => {
+    const id = 'gw-' + Math.random().toString(36).slice(2, 6);
+    setGateways((gs) => [...gs, { id, name: name || 'My Gateway', code: (code || '').toUpperCase(), addedAt: Date.now() }]);
+  }, []);
+  const removeGateway = useCallback((id) => {
+    setGateways((gs) => gs.filter((g) => g.id !== id));
+  }, []);
+
   const addJournalEntry = useCallback((deviceId, entry) => {
     setJournals((j) => ({ ...j, [deviceId]: [{ id: 'e' + Date.now(), date: Date.now(), ...entry }, ...(j[deviceId] || [])] }));
   }, []);
@@ -307,6 +321,7 @@ export function AppProvider({ children }) {
     settings, updateSettings,
     tier: TIERS[tierId] || TIERS.free, tierId, setTier, showPlans, openPlans, closePlans,
     journals, addJournalEntry, removeJournalEntry, weather,
+    gateways, addGateway, removeGateway,
   };
 
   return <AppCtx.Provider value={value}>{children}</AppCtx.Provider>;

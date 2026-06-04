@@ -1,10 +1,12 @@
 import { useState } from 'react';
+import { Wifi, RadioTower } from 'lucide-react';
 
-// Real device claim: the user names their plant, sets its HOME location
-// (weather and rain alerts follow the plant, not the owner's phone), and
-// enters the short pairing code shown on the unit's screen. The code is
-// validated against the registry; an unrecognized code is rejected.
+// Real device claim: pick how the node gets online (its own Wi-Fi, or
+// through a LoRaWAN gateway), name the plant, set its HOME location
+// (weather follows the plant, not the owner's phone), and enter the
+// pairing code shown on the unit's screen.
 export default function ClaimDeviceSheet({ onClose, onClaim }) {
+  const [transport, setTransport] = useState('wifi');
   const [name, setName] = useState('');
   const [place, setPlace] = useState('');
   const [code, setCode] = useState('');
@@ -15,7 +17,7 @@ export default function ClaimDeviceSheet({ onClose, onClaim }) {
     if (!code.trim()) { setError('Enter the pairing code shown on your device.'); return; }
     setBusy(true);
     setError('');
-    const err = await onClaim(code.trim(), name.trim() || 'My Plant', place.trim());
+    const err = await onClaim(code.trim(), name.trim() || 'My Plant', place.trim(), transport);
     setBusy(false);
     if (err) setError(err);
     else onClose();
@@ -26,8 +28,20 @@ export default function ClaimDeviceSheet({ onClose, onClaim }) {
       <div className="sheet" onClick={(e) => e.stopPropagation()}>
         <div className="sheet__grab" />
         <h2>Connect your device</h2>
-        <p className="muted" style={{ marginTop: -6, marginBottom: 12 }}>
-          Name your plant, tell us where it lives, and enter the pairing code on the device's screen.
+
+        <div className="fieldlabel">How does it connect?</div>
+        <div className="rolechips">
+          <button type="button" className={`rolechip ${transport === 'wifi' ? 'active' : ''}`} onClick={() => setTransport('wifi')}>
+            <Wifi size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />Wi-Fi
+          </button>
+          <button type="button" className={`rolechip ${transport === 'lorawan' ? 'active' : ''}`} onClick={() => setTransport('lorawan')}>
+            <RadioTower size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />LoRaWAN gateway
+          </button>
+        </div>
+        <p className="muted" style={{ fontSize: 12, margin: '-4px 2px 12px' }}>
+          {transport === 'wifi'
+            ? 'Power the unit on and follow its Wi-Fi setup from your phone, then enter the code below. Updates every few seconds.'
+            : 'No Wi-Fi needed. Power the node near your gateway and it joins on its own, then enter the code below. Reports every few minutes, which is what makes batteries last for months.'}
         </p>
 
         <div className="fieldlabel">Plant name</div>

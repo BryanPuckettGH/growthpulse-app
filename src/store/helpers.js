@@ -181,10 +181,11 @@ export function alarmsFromPlant(deviceId, ranges) {
   ];
 }
 
+// The two ways a node gets online: its own Wi-Fi, or through a LoRaWAN
+// gateway (Farm Kit). Ethernet isn't offered on current hardware.
 export const TRANSPORTS = {
   wifi: { label: 'Wi-Fi', icon: 'wifi', color: '#13a4ff' },
   lorawan: { label: 'LoRaWAN', icon: 'lora', color: '#a06bff' },
-  ethernet: { label: 'Ethernet', icon: 'ethernet', color: '#22a06b' },
 };
 
 // --- display helpers for units and trends ---

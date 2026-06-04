@@ -176,6 +176,7 @@ body {
   padding: 9px 10px; border-radius: 99px; font-size: 13px; font-weight: 700;
   color: var(--ink-2); transition: all 0.18s ease; white-space: nowrap;
 }
+.pill:disabled { opacity: 0.35; cursor: not-allowed; }
 .pill.active { background: var(--green); color: #fff; box-shadow: 0 2px 8px rgba(35, 197, 82, 0.35); }
 .pill.active.blue { background: var(--blue); box-shadow: 0 2px 8px rgba(19, 164, 255, 0.35); }
 

@@ -2,15 +2,22 @@ import { useApp } from '../store/AppContext';
 import { Pills, Toggle } from '../components/UI';
 import { LogOut } from 'lucide-react';
 
-const REFRESH_OPTIONS = [
-  { value: 1000, label: '1s' },
-  { value: 2000, label: '2s' },
-  { value: 5000, label: '5s' },
-  { value: 10000, label: '10s' },
-];
-
 export default function SettingsView() {
-  const { settings, updateSettings, user, logout, tier, openPlans } = useApp();
+  const { settings, updateSettings, user, logout, tier, openPlans, devices } = useApp();
+
+  // Second-by-second refresh only makes sense for Wi-Fi nodes. LoRaWAN nodes
+  // check in every few minutes, so the fast rates grey out without Wi-Fi.
+  const hasLora = devices.some((d) => d.transport === 'lorawan');
+  const wifiPresent = devices.some((d) => d.transport === 'wifi');
+  const secondsHint = 'Needs a Wi-Fi device. LoRaWAN nodes report every few minutes.';
+  const refreshOptions = [
+    { value: 1000, label: '1s', disabled: !wifiPresent, disabledHint: secondsHint },
+    { value: 2000, label: '2s', disabled: !wifiPresent, disabledHint: secondsHint },
+    { value: 5000, label: '5s', disabled: !wifiPresent, disabledHint: secondsHint },
+    { value: 10000, label: '10s', disabled: !wifiPresent, disabledHint: secondsHint },
+    { value: 60000, label: '1m' },
+    { value: 300000, label: '5m' },
+  ];
   const n = settings.notifications || { push: true, email: false, emailAddr: '', sms: false, phone: '' };
   const setNotif = (patch) => updateSettings({ notifications: { ...n, ...patch } });
 
@@ -56,7 +63,15 @@ export default function SettingsView() {
           <div className="field__label">Refresh rate</div>
           <span className="muted">how often readings update</span>
         </div>
-        <Pills options={REFRESH_OPTIONS} value={settings.refreshMs} onChange={(v) => updateSettings({ refreshMs: v })} blue />
+        <Pills options={refreshOptions} value={settings.refreshMs} onChange={(v) => updateSettings({ refreshMs: v })} blue />
+        {hasLora && (
+          <p className="muted" style={{ fontSize: 12.5, margin: '10px 2px 0' }}>
+            LoRaWAN nodes check in every few minutes by design, so faster rates only apply to your Wi-Fi devices{wifiPresent ? '' : ' (you have none right now, which is why the second options are off)'}.
+          </p>
+        )}
+        <p className="muted" style={{ fontSize: 12.5, margin: '8px 2px 0' }}>
+          On battery-powered units, faster updates mean shorter battery life.
+        </p>
       </div>
 
       <div className="section-title">Notifications</div>

@@ -95,7 +95,7 @@ export default function LiveView() {
   const ranges = rangesForDevice(selectedDevice);
   const health = healthScore(r, ranges);
   const recs = recommendations(r, ranges);
-  const t = TRANSPORTS[selectedDevice.transport];
+  const t = TRANSPORTS[selectedDevice.transport] || TRANSPORTS.wifi;
   const healthColor = health >= 80 ? '#2ecc71' : health >= 55 ? '#f4a52b' : '#ef4444';
   const plant = PLANTS[selectedDevice.plant] || PLANTS.generic;
   const [detailKey, setDetailKey] = useState(null);

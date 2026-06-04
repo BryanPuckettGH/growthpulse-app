@@ -1,9 +1,9 @@
 /* Small reusable UI building blocks: icons, pills, toggle, slider,
    stepper, gauge, badge. Kept in one file so the views stay short. */
-import { Thermometer, Droplets, Sprout, Waves, Wifi, RadioTower, Cable, CloudRain } from 'lucide-react';
+import { Thermometer, Droplets, Sprout, Waves, Wifi, RadioTower, CloudRain } from 'lucide-react';
 
 const METRIC_ICONS = { temp: Thermometer, humidity: Droplets, moisture: Sprout, soil: Waves, rain: CloudRain };
-const TRANSPORT_ICONS = { wifi: Wifi, lora: RadioTower, ethernet: Cable };
+const TRANSPORT_ICONS = { wifi: Wifi, lora: RadioTower };
 
 export function MetricIcon({ name, size = 18, color }) {
   const I = METRIC_ICONS[name] || Thermometer;
@@ -24,11 +24,14 @@ export function Pills({ options, value, onChange, blue }) {
       {options.map((o) => {
         const val = typeof o === 'string' ? o : o.value;
         const label = typeof o === 'string' ? o : o.label;
+        const disabled = typeof o === 'object' && !!o.disabled;
         return (
           <button
             key={val}
+            disabled={disabled}
+            title={disabled && typeof o === 'object' ? o.disabledHint : undefined}
             className={`pill ${value === val ? 'active' : ''} ${blue ? 'blue' : ''}`}
-            onClick={() => onChange(val)}
+            onClick={() => !disabled && onChange(val)}
           >
             {label}
           </button>

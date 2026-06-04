@@ -3,15 +3,16 @@ import { useApp } from '../store/AppContext';
 import { TRANSPORTS } from '../store/helpers';
 import { TransportIcon } from '../components/UI';
 import { geocodePlace } from '../utils/geocode';
-import { Plus, Sprout, Lock, Pencil, Trash2, RefreshCcw, AlertTriangle, MapPin } from 'lucide-react';
+import { Plus, Sprout, Lock, Pencil, Trash2, RefreshCcw, AlertTriangle, MapPin, RadioTower } from 'lucide-react';
 import AddDeviceSheet from '../components/AddDeviceSheet';
 import ClaimDeviceSheet from '../components/ClaimDeviceSheet';
 
-// List of all devices (tap to select) plus add/claim and full device
-// management: rename, home location, delete, and factory reset for resale.
+// List of all devices (tap to select) plus add/claim, gateways, and full
+// device management: rename, home location, delete, and factory reset.
 export default function DevicesView() {
-  const { devices, selectedDeviceId, setSelectedDeviceId, addDevice, claimDevice, tier, openPlans, isDemo } = useApp();
+  const { devices, selectedDeviceId, setSelectedDeviceId, addDevice, claimDevice, tier, openPlans, isDemo, gateways, addGateway, removeGateway } = useApp();
   const [open, setOpen] = useState(false);
+  const [gwOpen, setGwOpen] = useState(false);
   const [editId, setEditId] = useState(null);
   const atLimit = devices.length >= tier.deviceLimit;
 
@@ -21,7 +22,7 @@ export default function DevicesView() {
 
       <div className="cardgrid">
       {devices.map((d) => {
-        const t = TRANSPORTS[d.transport];
+        const t = TRANSPORTS[d.transport] || TRANSPORTS.wifi;
         return (
           <div key={d.id} className={`device ${d.id === selectedDeviceId ? 'selected' : ''}`} onClick={() => setSelectedDeviceId(d.id)}>
             <div className="device__avatar" style={{ background: t.color + '1a' }}><Sprout size={22} color={t.color} /></div>
@@ -53,12 +54,75 @@ export default function DevicesView() {
         </button>
       )}
 
+      <div className="section-title">Your gateways</div>
+      {gateways.length > 0 && (
+        <div className="cardgrid">
+          {gateways.map((g) => (
+            <div key={g.id} className="device" style={{ cursor: 'default' }}>
+              <div className="device__avatar" style={{ background: '#a06bff1a' }}><RadioTower size={22} color="#a06bff" /></div>
+              <div className="device__main">
+                <div className="device__name">{g.name}</div>
+                <div className="device__meta">
+                  <span className="badge" style={{ color: '#a06bff' }}><RadioTower size={13} color="#a06bff" />Gateway</span>
+                  <span><span className="dot" style={{ background: '#2ecc71', marginRight: 5 }} />Linked</span>
+                  <span>code {g.code}</span>
+                </div>
+              </div>
+              <button className="device__edit" onClick={() => removeGateway(g.id)} aria-label="Remove gateway"><Trash2 size={16} /></button>
+            </div>
+          ))}
+        </div>
+      )}
+      <p className="muted" style={{ fontSize: 12.5, margin: '2px 4px 8px' }}>
+        A gateway lets LoRaWAN nodes work miles from your router, perfect for fields and far greenhouses.
+        It's the only Farm Kit piece that touches the internet; nodes join through it automatically.
+      </p>
+      <button className="btn btn--ghost" onClick={() => setGwOpen(true)}>
+        <RadioTower size={15} style={{ verticalAlign: '-3px', marginRight: 6 }} />Add a LoRaWAN gateway
+      </button>
+
       {open && (isDemo
         ? <AddDeviceSheet onClose={() => setOpen(false)} onAdd={addDevice} />
         : <ClaimDeviceSheet onClose={() => setOpen(false)} onClaim={claimDevice} />)}
+      {gwOpen && <GatewaySheet onClose={() => setGwOpen(false)} onAdd={addGateway} />}
       {editId && devices.find((d) => d.id === editId) && (
         <DeviceEditSheet device={devices.find((d) => d.id === editId)} onClose={() => setEditId(null)} />
       )}
+    </div>
+  );
+}
+
+function GatewaySheet({ onClose, onAdd }) {
+  const [name, setName] = useState('');
+  const [code, setCode] = useState('');
+  const [error, setError] = useState('');
+
+  const submit = () => {
+    if (!code.trim()) { setError('Enter the pairing code from the gateway label.'); return; }
+    onAdd(name.trim() || 'My Gateway', code.trim());
+    onClose();
+  };
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="sheet__grab" />
+        <h2>Add a LoRaWAN gateway</h2>
+        <p className="muted" style={{ marginTop: -6, marginBottom: 12 }}>
+          Plug the gateway into your router with the included cable (or set up its Wi-Fi), then enter
+          the pairing code from the label on its base. Nodes within range join through it automatically.
+        </p>
+
+        <div className="fieldlabel">Gateway name</div>
+        <input className="input" placeholder="e.g. Barn Gateway" value={name} onChange={(e) => setName(e.target.value)} />
+
+        <div className="fieldlabel">Pairing code (on the gateway label)</div>
+        <input className="input" placeholder="e.g. GW-91D2" value={code} onChange={(e) => setCode(e.target.value)} />
+
+        {error && <p className="center" style={{ color: 'var(--red)', fontSize: 13, margin: '0 0 10px' }}>{error}</p>}
+
+        <button className="btn btn--green" onClick={submit}>Add gateway</button>
+      </div>
     </div>
   );
 }
@@ -149,6 +213,13 @@ function DeviceEditSheet({ device, onClose }) {
             </div>
           ))}
         </div>
+        {transport !== device.transport && (
+          <p className="muted" style={{ fontSize: 12, margin: '-4px 2px 10px' }}>
+            The switch takes effect the next time the node powers on. Moving to Wi-Fi runs the usual
+            phone setup and updates every few seconds; moving to LoRaWAN just needs a gateway in range
+            and reports every few minutes, which greatly extends battery life.
+          </p>
+        )}
         <button className="btn btn--green" disabled={busy} onClick={save}>{busy ? 'Saving...' : 'Save changes'}</button>
 
         <div className="danger">
