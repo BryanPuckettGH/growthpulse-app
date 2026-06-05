@@ -46,8 +46,8 @@ Sensors -> ESP32 firmware -> MQTT -> Losant device cloud
 |----------|----------------|
 | [User Manual (PDF)](docs/GrowthPulse%20User%20Manual.pdf) | Customer-facing: setup, Wi-Fi pairing, every app feature, troubleshooting, FAQ, specs |
 | [Engineering Manual (PDF)](docs/GrowthPulse%20Engineering%20Manual.pdf) | Deep dive: hardware, firmware section by section, cloud, backend, app architecture, decision log, debugging runbook |
-| [Wiring Guide](docs/GrowthPulse%20Wiring%20Guide.md) + [Wiring Diagram (PDF)](docs/GrowthPulse%20Wiring%20Diagram.pdf) | Bench wiring, pin by pin, with the pull-up explained |
-| [Product Roadmap](docs/GrowthPulse%20Product%20Roadmap.md) + [Deployment Model](docs/GrowthPulse%20Deployment%20Model.md) | Product strategy |
+| [Wiring Guide (PDF)](docs/GrowthPulse%20Wiring%20Guide.pdf) + [Wiring Diagram (PDF)](docs/GrowthPulse%20Wiring%20Diagram.pdf) | Bench wiring, pin by pin, with the pull-up explained |
+| [Product Roadmap (PDF)](docs/GrowthPulse%20Product%20Roadmap.pdf) + [Deployment Model (PDF)](docs/GrowthPulse%20Deployment%20Model.pdf) | Product strategy |
 | [Supabase schema](docs/growthpulse-supabase-schema.sql) | The `device_registry` table and its row-level security |
 
 Markdown versions of both manuals sit next to the PDFs so they stay editable.
