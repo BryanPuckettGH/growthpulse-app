@@ -307,6 +307,13 @@ input[type='range'].slider::-moz-range-thumb {
 }
 .rolechip.active { border-color: var(--green); background: #eafaf0; color: var(--green-d); }
 .danger { border-top: 1px solid var(--line); margin-top: 16px; padding-top: 12px; }
+.offlinebar {
+  display: flex; align-items: center; gap: 8px;
+  background: #fff7e6; border: 1px solid #f5dfae; color: #8a5a00;
+  border-radius: 12px; padding: 10px 13px; margin-bottom: 12px;
+  font-size: 13px; font-weight: 600;
+}
+:root[data-theme='dark'] .offlinebar { background: #2b2212; border-color: #5c4a1e; color: #e3b35c; }
 .warnbox {
   display: flex; gap: 10px; align-items: flex-start;
   background: #fef2f2; border: 1px solid #fecaca; border-radius: 14px;

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useApp } from '../store/AppContext';
 import {
   METRICS, PLANTS, statusOf, healthScore, recommendations, rangesForDevice, TRANSPORTS,
-  displayValue, displayUnit, trendOf, metricConnected,
+  displayValue, displayUnit, trendOf, metricConnected, timeAgo,
 } from '../store/helpers';
 import { MetricIcon, TransportIcon, Gauge, statusColor, PowerBadge } from '../components/UI';
 import Chart from '../components/Chart';
@@ -10,7 +10,7 @@ import WeatherCard from '../components/WeatherCard';
 import PlantPicker from '../components/PlantPicker';
 import GrowthJournal from '../components/GrowthJournal';
 import IrrigationCard from '../components/IrrigationCard';
-import { AlertTriangle, Info, CheckCircle2, TrendingUp, TrendingDown, Minus, ChevronRight, CloudRain, Sparkles, Droplet } from 'lucide-react';
+import { AlertTriangle, Info, CheckCircle2, TrendingUp, TrendingDown, Minus, ChevronRight, CloudRain, Sparkles, Droplet, WifiOff } from 'lucide-react';
 
 const HERO = ['airTemperatureF', 'airHumidity', 'soilMoisturePercent'];
 const CHIPS = ['airTemperatureF', 'soilTemperatureF', 'airHumidity', 'soilMoisturePercent'];
@@ -105,6 +105,12 @@ export default function LiveView() {
 
   return (
     <div>
+      {!selectedDevice.online && (
+        <div className="offlinebar">
+          <WifiOff size={15} />
+          Device offline · last reading {timeAgo(selectedDevice.lastSeen)}. Showing the most recent data.
+        </div>
+      )}
       <RainPausePrompt />
       <button className="plantbar" onClick={() => setPlantOpen(true)}>
         <span className="plantbar__emoji">{plant.emoji}</span>

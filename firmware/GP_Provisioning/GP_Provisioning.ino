@@ -19,6 +19,7 @@
 #include <ArduinoJson.h>
 #include <Wire.h>
 #include <U8g2lib.h>
+#include <esp_task_wdt.h>        // hardware watchdog: auto-reboot on a hang
 
 // ----------------- Pins -----------------
 #define ONE_WIRE_BUS 4
@@ -26,6 +27,10 @@
 #define DHTTYPE DHT22
 #define SOIL_PIN 2                // Soil on GPIO2 (GPIO1 is tied to battery-sense)
 #define RESET_BTN 0               // PRG button (GPIO0): hold 3s to redo Wi-Fi setup
+
+#define FW_VERSION "1.1"          // shown on the boot self-test screen
+#define WDT_TIMEOUT_S 60          // reboot if the firmware hangs this long
+#define DIM_AFTER_MS (5UL * 60UL * 1000UL)  // dim the OLED after 5 idle minutes
 
 // ----------------- On-board OLED (Heltec V3) -----------------
 #define VEXT_PIN 36
@@ -41,7 +46,6 @@ int wetValue = 1300;
 // ----------------- Losant identity (this unit) -----------------
 // PLACEHOLDERS: create your own device + access key at losant.com and
 // paste the three values here before flashing. Never commit real values.
-// Full setup walkthrough: docs/GrowthPulse Engineering Manual.pdf
 const char* LOSANT_DEVICE_ID    = "YOUR-LOSANT-DEVICE-ID";
 const char* LOSANT_ACCESS_KEY   = "YOUR-LOSANT-ACCESS-KEY";
 const char* LOSANT_ACCESS_SECRET= "YOUR-LOSANT-ACCESS-SECRET";
@@ -90,6 +94,10 @@ float airTemperatureF = 0.0;
 float airHumidity = 0.0;
 int soilRaw = 0;
 int soilMoisturePercent = 0;
+
+// Screen burn-in protection state.
+unsigned long lastInteraction = 0;
+bool oledDimmed = false;
 
 // ============================================================
 // On-board OLED helpers
@@ -157,7 +165,56 @@ void oledStatus(bool online) {
   oled.sendBuffer();
 }
 
+// OLED burn-in protection: dim after idle, restore on any button press.
+void oledWake() {
+  lastInteraction = millis();
+  if (oledDimmed) {
+    oled.setContrast(255);
+    oledDimmed = false;
+  }
+}
+
+void updateScreenPower() {
+  bool shouldDim = millis() - lastInteraction > DIM_AFTER_MS;
+  if (shouldDim && !oledDimmed) {
+    oled.setContrast(20);
+    oledDimmed = true;
+  }
+}
+
+// Boot self-test: prove each probe answers before going online, and show the
+// result like a manufacturing POST screen. "--" means check that sensor.
+void bootSelfTest() {
+  ds18b20.requestTemperatures();
+  bool soilT = ds18b20.getTempCByIndex(0) > -100;   // -127 = not found
+
+  float at = dht.readTemperature();
+  if (isnan(at)) {                                   // DHT22 needs ~2s after begin()
+    delay(2200);
+    at = dht.readTemperature();
+  }
+  bool air = !isnan(at);
+
+  int raw = analogRead(SOIL_PIN);
+  bool moist = raw > 300;                            // floating probe reads near 0
+
+  oled.clearBuffer();
+  oled.setFont(u8g2_font_6x12_tr);
+  oled.drawStr(2, 11, "Self-test   v" FW_VERSION);
+  oled.drawHLine(0, 14, 128);
+  oled.setFont(u8g2_font_6x10_tr);
+  oled.drawStr(2, 28, soilT ? "Soil temp      OK" : "Soil temp      --");
+  oled.drawStr(2, 41, air   ? "Air sensor     OK" : "Air sensor     --");
+  oled.drawStr(2, 54, moist ? "Moisture       OK" : "Moisture       --");
+  oled.sendBuffer();
+
+  Serial.printf("Self-test: soilTemp=%s air=%s moisture=%s (raw=%d)\n",
+                soilT ? "OK" : "missing", air ? "OK" : "missing", moist ? "OK" : "missing", raw);
+  delay(2500);
+}
+
 void onSetupPortal(WiFiManager* mgr) {
+  oledWake();
   oledSetup();
 }
 
@@ -181,7 +238,13 @@ void connectWiFi() {
   Serial.println(ap);
   oledMessage("Connecting to", "your Wi-Fi...");
 
-  if (!wm.autoConnect(ap.c_str())) {
+  // The setup portal may legitimately stay open for minutes; take this task
+  // off the watchdog while it does, then put it back.
+  esp_task_wdt_delete(NULL);
+  bool ok = wm.autoConnect(ap.c_str());
+  esp_task_wdt_add(NULL);
+
+  if (!ok) {
     Serial.println("Wi-Fi setup timed out. Restarting...");
     oledMessage("Setup timed out", "restarting...");
     delay(1500);
@@ -221,6 +284,7 @@ void connectLosant() {
   oledMessage("Connecting to", "GrowthPulse cloud");
   device.connect(wifiClient, LOSANT_ACCESS_KEY, LOSANT_ACCESS_SECRET);
   while (!device.connected()) {
+    esp_task_wdt_reset();   // retrying the cloud is intentional, not a hang
     delay(500);
     Serial.print(".");
   }
@@ -261,6 +325,23 @@ void setup() {
 
   // Listen for commands from the app (remote factory reset).
   device.onCommand(&handleCommand);
+
+  lastInteraction = millis();
+  bootSelfTest();
+
+  // Hardware watchdog: if the firmware ever hard-hangs, reboot instead of
+  // sitting dead until someone notices the plant data stopped.
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+  esp_task_wdt_config_t wdtCfg = {
+    .timeout_ms = WDT_TIMEOUT_S * 1000,
+    .idle_core_mask = 0,
+    .trigger_panic = true,
+  };
+  esp_task_wdt_reconfigure(&wdtCfg);
+#else
+  esp_task_wdt_init(WDT_TIMEOUT_S, true);
+#endif
+  esp_task_wdt_add(NULL);
 
   connectWiFi();
   connectLosant();
@@ -314,7 +395,7 @@ void sendTelemetry() {
 void maybeResetWifi() {
   static unsigned long pressStart = 0;
   if (digitalRead(RESET_BTN) == LOW) {        // PRG button held down
-    if (pressStart == 0) pressStart = millis();
+    if (pressStart == 0) { pressStart = millis(); oledWake(); }  // any tap wakes the screen
     else if (millis() - pressStart >= 3000) {
       Serial.println("PRG held 3s: clearing saved Wi-Fi, reopening setup...");
       oledMessage("Clearing Wi-Fi", "reopening setup");
@@ -333,6 +414,8 @@ void maybeResetWifi() {
 // Main loop
 // ============================================================
 void loop() {
+  esp_task_wdt_reset();   // feed the watchdog every healthy cycle
+
   if (WiFi.status() != WL_CONNECTED) {
     connectWiFi();
   }
@@ -346,10 +429,12 @@ void loop() {
   device.loop();
   oledStatus(WiFi.status() == WL_CONNECTED && device.connected());
 
-  // Wait ~3s between sends, but keep watching PRG so a 3s hold resets Wi-Fi.
+  // Wait ~3s between sends, but keep watching PRG so a 3s hold resets Wi-Fi,
+  // and manage the screen dimmer while we wait.
   unsigned long waitStart = millis();
   while (millis() - waitStart < 3000) {
     maybeResetWifi();
+    updateScreenPower();
     delay(20);
   }
 }

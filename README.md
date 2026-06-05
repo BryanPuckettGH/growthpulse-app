@@ -51,6 +51,7 @@ Sensors -> ESP32 firmware -> MQTT -> Losant device cloud
 | [Supabase schema](docs/growthpulse-supabase-schema.sql) | The `device_registry` table and its row-level security |
 
 Markdown versions of both manuals sit next to the PDFs so they stay editable.
+Version history for the app and firmware: [CHANGELOG.md](CHANGELOG.md).
 
 ## Firmware (in `firmware/`)
 

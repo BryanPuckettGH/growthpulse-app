@@ -115,10 +115,27 @@ export function AppProvider({ children }) {
       setDevices((ds) =>
         ds.map((d) => {
           if (d.losantDeviceId) {
+            // Freshness window: a Wi-Fi node reports every few seconds, so 45s
+            // of silence means it's offline. LoRaWAN reports in minutes.
+            const STALE_MS = d.transport === 'lorawan' ? 15 * 60 * 1000 : 45 * 1000;
             const u = updates[d.id];
-            if (!u) return d;
+            if (!u) {
+              // Fetch failed or no data; re-evaluate freshness of what we have.
+              if (d.online && d.lastSeen && Date.now() - d.lastSeen > STALE_MS) return { ...d, online: false };
+              return d;
+            }
+            const fresh = !!u.time && Date.now() - u.time < STALE_MS;
+            const isNew = !!u.time && u.time !== d.lastSeen;
             const reading = { ...d.reading, ...u };
-            return { ...d, reading, history: [...d.history, reading].slice(-60), lastSeen: u.time || Date.now(), online: true, hasData: true };
+            return {
+              ...d,
+              reading,
+              // Only append genuinely new reports, not re-reads of the same one.
+              history: isNew ? [...d.history, reading].slice(-60) : d.history,
+              lastSeen: u.time || d.lastSeen,
+              online: fresh,
+              hasData: true,
+            };
           }
           const r = nextReading(d.reading);
           return { ...d, reading: r, history: [...d.history, r].slice(-60), lastSeen: r.time };

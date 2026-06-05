@@ -5,7 +5,7 @@ const ROLES = ['Hobbyist', 'Home grower', 'Farmer', 'Commercial'];
 
 // Real sign-in / sign-up using Supabase auth, plus a demo mode for prospects.
 export default function Login() {
-  const { login, signup, startDemo } = useAuth();
+  const { login, signup, startDemo, resetPassword } = useAuth();
   const [mode, setMode] = useState('login'); // 'login' | 'signup'
   const [first, setFirst] = useState('');
   const [last, setLast] = useState('');
@@ -14,7 +14,19 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
   const [busy, setBusy] = useState(false);
+
+  const forgot = async () => {
+    if (!email) { setError('Type your email above first, then tap Forgot password.'); return; }
+    setBusy(true);
+    setError('');
+    setInfo('');
+    const err = await resetPassword(email.trim());
+    setBusy(false);
+    if (err) setError(err);
+    else setInfo('Reset link sent. Check your email (and spam) to set a new password.');
+  };
 
   const submit = async () => {
     if (!email || !password) { setError('Enter your email and password.'); return; }
@@ -66,12 +78,21 @@ export default function Login() {
         )}
 
         {error && <p className="center" style={{ color: 'var(--red)', fontSize: 13, margin: '0 0 10px' }}>{error}</p>}
+        {info && <p className="center" style={{ color: 'var(--green-d)', fontSize: 13, margin: '0 0 10px', fontWeight: 600 }}>{info}</p>}
 
         <button className="btn btn--green" disabled={busy} onClick={submit}>
           {busy ? 'Please wait...' : mode === 'login' ? 'Sign in' : 'Create account'}
         </button>
 
         <button className="btn btn--ghost" style={{ marginTop: 10 }} onClick={startDemo}>Explore the demo</button>
+
+        {mode === 'login' && (
+          <p className="muted center" style={{ marginTop: 12, marginBottom: 0 }}>
+            <span style={{ color: 'var(--green-d)', fontWeight: 700, cursor: 'pointer' }} onClick={forgot}>
+              Forgot your password?
+            </span>
+          </p>
+        )}
 
         <p className="muted center" style={{ marginTop: 14 }}>
           {mode === 'login' ? 'New to GrowthPulse? ' : 'Already have an account? '}

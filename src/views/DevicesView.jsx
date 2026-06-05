@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useApp } from '../store/AppContext';
-import { TRANSPORTS } from '../store/helpers';
+import { TRANSPORTS, timeAgo } from '../store/helpers';
 import { TransportIcon, PowerBadge } from '../components/UI';
 import { geocodePlace } from '../utils/geocode';
 import { Plus, Sprout, Lock, Pencil, Trash2, RefreshCcw, AlertTriangle, MapPin, RadioTower } from 'lucide-react';
@@ -31,7 +31,10 @@ export default function DevicesView() {
           <div className="device__meta">
             <span className="badge"><TransportIcon name={t.icon} color={t.color} />{t.label}</span>
             <PowerBadge reading={d.reading} compact />
-            <span><span className="dot" style={{ background: d.online ? '#2ecc71' : '#cfd3d8', marginRight: 5 }} />{d.online ? 'Online' : 'Offline'}</span>
+            <span>
+              <span className="dot" style={{ background: d.online ? '#2ecc71' : '#cfd3d8', marginRight: 5 }} />
+              {d.online ? 'Online' : d.hasData ? `Offline · ${timeAgo(d.lastSeen)}` : 'Offline'}
+            </span>
             {d.location && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><MapPin size={11} />{d.location}</span>}
           </div>
         </div>

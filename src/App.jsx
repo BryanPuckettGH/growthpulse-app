@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { AppProvider, useApp } from './store/AppContext';
 import { AuthProvider, useAuth } from './auth/AuthProvider';
 import Login from './components/Login';
+import ResetPassword from './components/ResetPassword';
 import LiveView from './views/LiveView';
 import HistoryView from './views/HistoryView';
 import AlarmsView from './views/AlarmsView';
@@ -130,7 +131,7 @@ function Shell() {
 
 // Decides what to show based on auth state.
 function Gate() {
-  const { user, authReady, configured } = useAuth();
+  const { user, authReady, configured, recovery } = useAuth();
 
   if (!configured) {
     return (
@@ -144,6 +145,8 @@ function Gate() {
   if (!authReady) {
     return <div style={{ padding: 80, textAlign: 'center' }} className="muted">Loading...</div>;
   }
+  // Arriving from a password-reset email takes priority over everything.
+  if (recovery) return <ResetPassword />;
   if (!user) return <Login />;
 
   return (
