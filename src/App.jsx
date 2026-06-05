@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { AppProvider, useApp } from './store/AppContext';
 import { AuthProvider, useAuth } from './auth/AuthProvider';
-import Login from './components/Login';
+import Landing from './components/Landing';
 import ResetPassword from './components/ResetPassword';
 import LiveView from './views/LiveView';
 import HistoryView from './views/HistoryView';
@@ -147,7 +147,8 @@ function Gate() {
   }
   // Arriving from a password-reset email takes priority over everything.
   if (recovery) return <ResetPassword />;
-  if (!user) return <Login />;
+  // Logged-out visitors see the marketing page; the app sits behind Sign in.
+  if (!user) return <Landing />;
 
   return (
     <AppProvider key={user.id}>

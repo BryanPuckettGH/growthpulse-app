@@ -28,7 +28,7 @@
 #define SOIL_PIN 2                // Soil on GPIO2 (GPIO1 is tied to battery-sense)
 #define RESET_BTN 0               // PRG button (GPIO0): hold 3s to redo Wi-Fi setup
 
-#define FW_VERSION "1.1"          // shown on the boot self-test screen
+#define FW_VERSION "2.1"          // shown on the boot self-test screen (see CHANGELOG.md)
 #define WDT_TIMEOUT_S 60          // reboot if the firmware hangs this long
 #define DIM_AFTER_MS (5UL * 60UL * 1000UL)  // dim the OLED after 5 idle minutes
 
@@ -44,8 +44,6 @@ int dryValue = 3600;
 int wetValue = 1300;
 
 // ----------------- Losant identity (this unit) -----------------
-// PLACEHOLDERS: create your own device + access key at losant.com and
-// paste the three values here before flashing. Never commit real values.
 const char* LOSANT_DEVICE_ID    = "YOUR-LOSANT-DEVICE-ID";
 const char* LOSANT_ACCESS_KEY   = "YOUR-LOSANT-ACCESS-KEY";
 const char* LOSANT_ACCESS_SECRET= "YOUR-LOSANT-ACCESS-SECRET";

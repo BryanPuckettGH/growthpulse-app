@@ -6,19 +6,19 @@ All notable changes to GrowthPulse, the web app and the device firmware.
 
 ## Web App
 
-### v1.0.0 — June 5, 2026
+### v2.6.0 — June 5, 2026
 - Offline detection: devices flip to Offline after 45s of silence (15 min for LoRaWAN), with "last reading X ago" on the dashboard and device cards. Stale data can no longer appear live.
 - Forgot password: email reset link with a branded set-new-password screen.
 - Download my data: one-click JSON export of devices, alarms, journals, gateways, and settings.
 - Version stamp in Settings (version + build date).
 - History no longer records duplicate readings while a device is offline.
 
-### v0.9.0 — June 5, 2026
+### v2.5.0 — June 5, 2026
 - Documentation shipped into the repo: User Manual, Engineering Manual, Wiring Guide and Diagram, Product Roadmap, Deployment Model (PDF + markdown).
 - Sanitized firmware and bench diagnostic sketches added under `firmware/`.
 - Full README rewrite: architecture, setup, env vars, security model.
 
-### v0.8.0 — June 5, 2026
+### v2.4.0 — June 5, 2026
 - Disconnected-sensor detection: probes that are unplugged show "not connected" with fix-it hints instead of garbage values; health score counts only live sensors.
 - Power status: AC/battery badges with charging state and low-battery warnings.
 - Device groups (Greenhouse, Backyard, ...) with grouped Devices view.
@@ -26,7 +26,7 @@ All notable changes to GrowthPulse, the web app and the device firmware.
 - Refresh-rate options became LoRaWAN-aware, with battery-drain guidance.
 - Fixed device card text overflow on narrow screens.
 
-### v0.7.0 — June 4, 2026
+### v2.3.0 — June 4, 2026
 - Signup upgraded: first/last name, confirm password, grower type; the app greets users by name.
 - Per-plant home location: weather and rain alerts follow the plant, not the owner's phone.
 - Device management: rename, edit location, switch connection type, delete with full data purge.
@@ -34,56 +34,56 @@ All notable changes to GrowthPulse, the web app and the device firmware.
 - Connection choice at setup (Wi-Fi or LoRaWAN gateway); gateway management section; Ethernet retired.
 - Desktop fix: onboarding screen no longer renders inside the sidebar column.
 
-### v0.6.0 — June 4, 2026
+### v2.2.0 — June 4, 2026
 - Installable app (PWA): Add to Home Screen with real icons, full-screen mode, notch/safe-area support.
 - Form fields inherit the app font (fixed "shifted" text in inputs).
 
-### v0.5.0 — June 3, 2026
+### v2.1.0 — June 3, 2026
 - Pairing codes validated against the device registry (Supabase); junk codes rejected.
 - Honest device states: claimed devices show "waiting for first reading" until real data arrives.
 
-### v0.4.0 — June 3, 2026
+### v2.0.0 — June 3, 2026
 - Real accounts (Supabase auth) with per-account data isolation.
 - Demo mode for prospects, fully separated from real data.
 - Live cloud readings through the secure `device-state` serverless connector.
 - Claim-a-device onboarding for new accounts.
 
-### v0.3.0 — June 3, 2026
+### v1.2.0 — June 3, 2026
 - Losant cloud integration: device, access keys, telemetry simulator.
 - Real email/SMS alert workflows (fire even with the app closed).
 
-### v0.2.0 — June 2, 2026
+### v1.1.0 — June 2, 2026
 - Plant profile catalog with species-specific ideal ranges.
 - Weather rain gauge with rain-aware watering suggestions.
 - Growth journal with photos; irrigation control card; subscription tiers; dark mode; smarter alarms with auto-set; device editing; richer history charts with ideal bands.
 
-### v0.1.0 — June 1, 2026
+### v1.0.0 — June 1, 2026
 - Initial app: live dashboard with health score, history charts, alarm rules, device list, full design system, simulated data.
 
 ---
 
 ## Device Firmware (GP_Provisioning)
 
-### v1.1 — June 5, 2026
+### v2.1 — June 5, 2026
 - Boot self-test: POST-style checklist on the OLED (soil temp / air / moisture) before going online.
 - Hardware watchdog: automatic reboot on firmware hang, portal-aware so setup is never interrupted.
 - OLED burn-in protection: screen dims after 5 idle minutes, any PRG tap wakes it.
 
-### v1.0 — June 5, 2026
+### v2.0 — June 5, 2026
 - Remote factory reset: the app sends a cloud command and the unit wipes its own Wi-Fi and reboots into setup mode for a new owner.
 
-### v0.8 — June 4, 2026
+### v1.6 — June 4, 2026
 - Soil moisture moved to GPIO2 (GPIO1 conflicts with the board's battery-sense circuit).
 - Soil sensor powered from 5V (NE555 oscillator requires >4V; resolves frozen 100% readings).
 - Raw soil ADC added to telemetry and the serial line for field calibration.
 
-### v0.7 — June 4, 2026
+### v1.5 — June 4, 2026
 - Pairing code displayed large on the built-in OLED (no Serial Monitor needed).
 - PRG reset paths: hold at power-on, or hold 3 seconds any time, to wipe Wi-Fi and reopen setup.
 - Captive-portal fixes: faster phone joins (no background scan-hopping, no modem sleep), setup window extended to 10 minutes.
 
-### v0.5 — June 3, 2026
+### v1.0 — June 3, 2026
 - Provisioning firmware: branded captive-portal Wi-Fi setup (logo, welcome page), chip-ID pairing code, Losant cloud streaming with auto-reconnect.
 
-### v0.1 — late May 2026
+### v0.9 — late May 2026
 - Team baseline sketch: sensor reads with hardcoded Wi-Fi credentials, serial output (original team repository).

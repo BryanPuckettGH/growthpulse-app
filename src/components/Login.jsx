@@ -4,9 +4,9 @@ import { useAuth } from '../auth/AuthProvider';
 const ROLES = ['Hobbyist', 'Home grower', 'Farmer', 'Commercial'];
 
 // Real sign-in / sign-up using Supabase auth, plus a demo mode for prospects.
-export default function Login() {
+export default function Login({ initialMode = 'login', onBack }) {
   const { login, signup, startDemo, resetPassword } = useAuth();
-  const [mode, setMode] = useState('login'); // 'login' | 'signup'
+  const [mode, setMode] = useState(initialMode); // 'login' | 'signup'
   const [first, setFirst] = useState('');
   const [last, setLast] = useState('');
   const [role, setRole] = useState('Hobbyist');
@@ -48,6 +48,9 @@ export default function Login() {
 
   return (
     <div className="login">
+      {onBack && (
+        <button className="landing__back" onClick={onBack}>← Back</button>
+      )}
       <div className="brand">
         <img className="brand__icon" src="/growthpulse-icon.svg" alt="" />
         <div className="brand__word">Growth<span className="brand__word-accent">Pulse</span></div>
