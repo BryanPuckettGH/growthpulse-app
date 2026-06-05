@@ -6,6 +6,19 @@ All notable changes to GrowthPulse, the web app and the device firmware.
 
 ## Web App
 
+### v2.8.0 — June 5, 2026
+- Full plant report: the Settings download is now a complete PDF report with per-sensor history graphs (ideal-range shading, min/avg/max, offline gaps) and a chronological activity timeline.
+- Report options: pick the time period (24h / 7 days / 30 days / everything / custom dates), which plants, and which sensors to include.
+- New `device-history` cloud function pulls the full sensor history from the device cloud, so reports cover the entire time a device has been connected (auto-averaged to stay readable).
+- Removed the JSON export link from Settings.
+
+### v2.7.0 — June 5, 2026
+- Cloud device ownership: claimed plants now live in the account, not the browser. Sign in anywhere and your plants follow; one-time automatic migration of existing claims.
+- A pairing code can only be claimed by one account at a time.
+- Factory reset is now authorized server-side: only the device's owner can send it.
+- Branded PDF account export replaced the plain JSON download.
+- Landing page v2: sub-pages (Features, Farm Kit, Pricing, FAQ), new button system, polished hero.
+
 ### v2.6.0 — June 5, 2026
 - Offline detection: devices flip to Offline after 45s of silence (15 min for LoRaWAN), with "last reading X ago" on the dashboard and device cards. Stale data can no longer appear live.
 - Forgot password: email reset link with a branded set-new-password screen.

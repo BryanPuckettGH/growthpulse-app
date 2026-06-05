@@ -1,37 +1,16 @@
+import { useState } from 'react';
 import { useApp } from '../store/AppContext';
 import { Pills, Toggle } from '../components/UI';
-import { openAccountExport } from '../utils/accountExport';
+import ExportSheet from '../components/ExportSheet';
 import { LogOut, Download } from 'lucide-react';
 import pkg from '../../package.json';
 
 export default function SettingsView() {
-  const { settings, updateSettings, user, logout, tier, openPlans, devices, alarmRules, journals, gateways, tierId } = useApp();
+  const { settings, updateSettings, user, logout, tier, openPlans, devices } = useApp();
 
-  // The customer-facing export: a branded PDF-ready document.
-  const exportPdf = () => {
-    openAccountExport({ user, devices, gateways, alarmRules, settings, journals, tierId });
-  };
-
-  // Machine-readable copy (data portability); secondary on purpose.
-  const exportJson = () => {
-    const data = {
-      exportedAt: new Date().toISOString(),
-      account: { name: user.name, email: user.email, growerType: user.growerType, plan: tierId },
-      devices: devices.map(({ id, name, location, geo, group, transport, plant, irrigation, losantDeviceId }) =>
-        ({ id, name, location, geo, group, transport, plant, irrigation, losantDeviceId })),
-      gateways,
-      alarmRules,
-      settings,
-      journals,
-    };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'GrowthPulse data export.json';
-    a.click();
-    URL.revokeObjectURL(url);
-  };
+  // The customer-facing export: a full PDF report with graphs and a
+  // timeline. The sheet collects the period / plant / sensor choices.
+  const [exportOpen, setExportOpen] = useState(false);
 
   // Second-by-second refresh only makes sense for Wi-Fi nodes. LoRaWAN nodes
   // check in every few minutes, so the fast rates grey out without Wi-Fi.
@@ -143,16 +122,15 @@ export default function SettingsView() {
             <div className="muted">{user.email}</div>
           </div>
         </div>
-        <button className="btn btn--ghost" onClick={exportPdf}>
-          <Download size={15} style={{ verticalAlign: '-3px', marginRight: 6 }} />Download my data (PDF)
+        <button className="btn btn--ghost" onClick={() => setExportOpen(true)}>
+          <Download size={15} style={{ verticalAlign: '-3px', marginRight: 6 }} />Download report (PDF)
         </button>
-        <p className="muted center" style={{ margin: '8px 0 0', fontSize: 12 }}>
-          Need it for software? <span style={{ color: 'var(--green-d)', fontWeight: 700, cursor: 'pointer' }} onClick={exportJson}>Machine-readable copy (JSON)</span>
-        </p>
         <button className="btn btn--ghost" style={{ marginTop: 10 }} onClick={logout}>
           <LogOut size={15} style={{ verticalAlign: '-3px', marginRight: 6 }} />Log out
         </button>
       </div>
+
+      {exportOpen && <ExportSheet onClose={() => setExportOpen(false)} />}
 
       <p className="muted center" style={{ margin: '18px 0 6px', fontSize: 12 }}>
         GrowthPulse v{pkg.version} · build {typeof __BUILD_DATE__ !== 'undefined' ? __BUILD_DATE__ : 'dev'}

@@ -82,6 +82,9 @@ function rowToDevice(r) {
     plant: r.plant,
     irrigation: r.irrigation || undefined,
     losantDeviceId: r.losant_device_id,
+    // When the plant joined this account; the report's "Everything" range
+    // and the activity timeline both start here.
+    claimedAt: r.created_at ? new Date(r.created_at).getTime() : 0,
   });
 }
 
