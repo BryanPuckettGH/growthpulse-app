@@ -19,6 +19,7 @@
 //   }
 import { METRICS, METRIC_ORDER, PLANTS, TRANSPORTS, powerInfo, timeAgo, rangesForDevice } from '../store/helpers';
 import { TIERS } from '../store/tiers';
+import { supabase } from '../supabaseClient';
 
 const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
@@ -372,31 +373,75 @@ function buildReport({ user, devices, gateways = [], alarmRules = [], settings, 
   return { title, css, body, user };
 }
 
-/* ---------- delivery: print-ready tab ---------- */
-export function openAccountExport(opts) {
-  const { title, css, body, user } = buildReport(opts);
-  const html = `<!doctype html>
+// A complete standalone HTML document (used by the print tab and sent to the
+// server renderer). `forPrint` adds the auto-print script.
+function standaloneHtml({ title, css, body, user }, forPrint) {
+  return `<!doctype html>
 <html><head><meta charset="utf-8"/><title>GrowthPulse ${title} · ${esc(user.name)}</title>
-<style>body { margin: 0; } ${css}</style></head>
+<style>body { margin: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; } ${css}</style></head>
 <body class="gp-doc">
   ${body}
-  <script>window.onload = function () { setTimeout(function () { window.print(); }, 350); };</script>
+  ${forPrint ? '<script>window.onload = function () { setTimeout(function () { window.print(); }, 350); };</script>' : ''}
 </body></html>`;
+}
 
+/* ---------- delivery: print-ready tab ---------- */
+export function openAccountExport(opts) {
+  const built = buildReport(opts);
   const w = window.open('', '_blank');
   if (!w) return false;
-  w.document.write(html);
+  w.document.write(standaloneHtml(built, true));
   w.document.close();
   return true;
 }
 
-/* ---------- delivery: direct .pdf download ---------- */
-export async function downloadAccountPdf(opts) {
-  const { title, css, body } = buildReport(opts);
+// Save a Blob to disk as a named file.
+function saveBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 
-  // Render the report off-screen at US Letter width, then let html2pdf
-  // (loaded on demand so it never weighs down normal app loads) rasterize it
-  // into a paginated PDF and save the file.
+// Server-side render: ship the finished HTML to the headless-Chrome function
+// and get back a true vector PDF. Returns true on success, false to let the
+// caller fall back to the in-browser renderer. Demo accounts (no session)
+// skip straight to the fallback.
+async function tryServerPdf(built, filename) {
+  if (!supabase) return false;
+  let token;
+  try {
+    const { data } = await supabase.auth.getSession();
+    token = data && data.session && data.session.access_token;
+  } catch {
+    token = null;
+  }
+  if (!token) return false; // not signed in (e.g. demo) -> client-side
+
+  try {
+    const res = await fetch('/.netlify/functions/render-pdf', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ html: standaloneHtml(built, false), filename }),
+    });
+    if (!res.ok) return false;
+    const blob = await res.blob();
+    if (!blob || blob.type !== 'application/pdf' || blob.size < 1000) return false;
+    saveBlob(blob, `${filename}.pdf`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// In-browser render: html2pdf rasterizes the report. Always available, works
+// offline and for demo accounts; slightly softer than the server's vector PDF.
+async function clientPdf(built, filename) {
+  const { css, body } = built;
   const host = document.createElement('div');
   host.style.cssText = 'position:fixed;left:-12000px;top:0;width:816px;background:#fff;z-index:-1;';
   host.innerHTML = `<style>${css}</style><div class="gp-doc">${body}</div>`;
@@ -404,7 +449,6 @@ export async function downloadAccountPdf(opts) {
 
   try {
     const { default: html2pdf } = await import('html2pdf.js');
-    const stamp = new Date().toISOString().slice(0, 10);
 
     // Render as sharp as the browser allows: 3x for typical reports, easing
     // down for very long ones so the page canvas stays inside mobile-Safari
@@ -417,7 +461,7 @@ export async function downloadAccountPdf(opts) {
     await html2pdf()
       .set({
         margin: [0.35, 0.3, 0.45, 0.3],
-        filename: `GrowthPulse ${title} ${stamp}.pdf`,
+        filename: `${filename}.pdf`,
         // PNG keeps text edges crisp (JPEG smears them with ringing artifacts).
         image: { type: 'png' },
         html2canvas: { scale, useCORS: true, backgroundColor: '#ffffff' },
@@ -430,4 +474,14 @@ export async function downloadAccountPdf(opts) {
   } finally {
     host.remove();
   }
+}
+
+/* ---------- delivery: direct .pdf download (server first, client fallback) ---------- */
+export async function downloadAccountPdf(opts) {
+  const built = buildReport(opts);
+  const stamp = new Date().toISOString().slice(0, 10);
+  const filename = `GrowthPulse ${built.title} ${stamp}`;
+
+  if (await tryServerPdf(built, filename)) return true;
+  return clientPdf(built, filename);
 }

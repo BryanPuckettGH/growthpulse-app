@@ -8,3 +8,10 @@
 [functions]
   directory = "netlify/functions"
   node_bundler = "esbuild"
+
+# The headless-Chrome PDF renderer needs its binary shipped alongside the
+# bundle, and the chromium package must stay external (esbuild can't inline a
+# native binary).
+[functions."render-pdf"]
+  external_node_modules = ["@sparticuz/chromium", "puppeteer-core"]
+  included_files = ["node_modules/@sparticuz/chromium/**"]
