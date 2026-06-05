@@ -158,29 +158,29 @@ function buildReport({ user, devices, gateways = [], alarmRules = [], settings, 
 
     let charts = '';
     if (history.length === 0) {
-      charts = `<div class="none" style="margin:6px 0 4px">No sensor data recorded in this period. ${d.hasData ? 'The device may have been offline.' : 'This plant has not connected to the cloud yet.'}</div>`;
+      charts = `<div class="gpr-none" style="margin:6px 0 4px">No sensor data recorded in this period. ${d.hasData ? 'The device may have been offline.' : 'This plant has not connected to the cloud yet.'}</div>`;
     } else {
       charts = metrics.map((key) => {
         const m = METRICS[key];
         const band = ranges[key] && ranges[key].good;
         const c = chartSvg(history, key, band);
         if (!c) {
-          return `<div class="chartcard"><div class="chead"><span class="cdot" style="background:${m.color}"></span><b>${m.label}</b><span class="cstat">sensor not connected in this period</span></div></div>`;
+          return `<div class="gpr-chartcard"><div class="gpr-chead"><span class="gpr-cdot" style="background:${m.color}"></span><b>${m.label}</b><span class="gpr-cstat">sensor not connected in this period</span></div></div>`;
         }
-        return `<div class="chartcard">
-          <div class="chead">
-            <span class="cdot" style="background:${m.color}"></span><b>${m.label}</b>
-            <span class="cstat">Min <b>${c.min}${m.unit}</b> · Avg <b>${c.avg}${m.unit}</b> · Max <b>${c.max}${m.unit}</b> · ${c.count} readings</span>
+        return `<div class="gpr-chartcard">
+          <div class="gpr-chead">
+            <span class="gpr-cdot" style="background:${m.color}"></span><b>${m.label}</b>
+            <span class="gpr-cstat">Min <b>${c.min}${m.unit}</b> · Avg <b>${c.avg}${m.unit}</b> · Max <b>${c.max}${m.unit}</b> · ${c.count} readings</span>
           </div>
           ${c.svg}
-          ${band ? `<div class="bandnote">Shaded zone = ideal range for ${esc(plant.name)} (${band[0]}–${band[1]}${m.unit})</div>` : ''}
+          ${band ? `<div class="gpr-bandnote">Shaded zone = ideal range for ${esc(plant.name)} (${band[0]}–${band[1]}${m.unit})</div>` : ''}
         </div>`;
       }).join('');
     }
 
-    return `<div class="plant">
-      <h2 class="plant__name">${esc(d.name)}</h2>
-      <div class="plant__facts">${facts}</div>
+    return `<div class="gpr-plant">
+      <h2 class="gpr-plant__name">${esc(d.name)}</h2>
+      <div class="gpr-plant__facts">${facts}</div>
       ${charts}
     </div>`;
   }).join('');
@@ -202,11 +202,11 @@ function buildReport({ user, devices, gateways = [], alarmRules = [], settings, 
     events.push({ t: now.getTime(), icon: '📄', text: 'This report was generated.' });
     events.sort((a, b) => a.t - b.t);
     timelineHtml = `<h2>Activity timeline</h2>
-    <div class="tl">${events.map((e) => `
-      <div class="tl__row">
-        <div class="tl__date">${fmtDateTime(e.t)}</div>
-        <div class="tl__dot">${e.icon}</div>
-        <div class="tl__text">${e.text}</div>
+    <div class="gpr-tl">${events.map((e) => `
+      <div class="gpr-tl__row">
+        <div class="gpr-tl__date">${fmtDateTime(e.t)}</div>
+        <div class="gpr-tl__dot">${e.icon}</div>
+        <div class="gpr-tl__text">${e.text}</div>
       </div>`).join('')}
     </div>`;
   }
@@ -261,72 +261,72 @@ function buildReport({ user, devices, gateways = [], alarmRules = [], settings, 
     const entries = journals[d.id] || [];
     if (entries.length === 0) return '';
     const items = entries.slice(0, 4).map((e) => `
-        <div class="entry">
-          <div class="edate">${new Date(e.date).toLocaleDateString()}</div>
+        <div class="gpr-entry">
+          <div class="gpr-edate">${new Date(e.date).toLocaleDateString()}</div>
           ${e.photo ? `<img src="${e.photo}" alt=""/>` : ''}
           <div>${esc(e.note || e.text || '')}</div>
         </div>`).join('');
-    const more = entries.length > 4 ? `<div class="muted-sm">+ ${entries.length - 4} more entries</div>` : '';
+    const more = entries.length > 4 ? `<div class="gpr-muted-sm">+ ${entries.length - 4} more entries</div>` : '';
     return `<h3>${esc(d.name)} (${entries.length} entr${entries.length === 1 ? 'y' : 'ies'})</h3>${items}${more}`;
   }).join('');
 
   const title = report ? 'Plant Data Report' : 'Account Data Export';
   const periodMeta = report
-    ? `<div><div class="l">Report period</div><div class="v">${esc(report.rangeLabel)}</div></div>
-       <div><div class="l">From</div><div class="v">${fmtDate(report.start)}</div></div>
-       <div><div class="l">To</div><div class="v">${fmtDate(report.end)}</div></div>`
+    ? `<div><div class="gpr-l">Report period</div><div class="gpr-v">${esc(report.rangeLabel)}</div></div>
+       <div><div class="gpr-l">From</div><div class="gpr-v">${fmtDate(report.start)}</div></div>
+       <div><div class="gpr-l">To</div><div class="gpr-v">${fmtDate(report.end)}</div></div>`
     : '';
 
   const css = `
   .gp-doc { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #2c3e50; background: #fff; padding: 36px; }
-  .gp-doc .brand b { font-size: 26px; letter-spacing: -0.5px; }
-  .gp-doc .brand b span { color: #2ecc71; font-weight: 400; }
-  .gp-doc .tag { font-size: 10px; letter-spacing: 2.5px; color: #8a94a0; margin-top: 2px; }
-  .gp-doc .docline { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 2px solid #2ecc71; padding-bottom: 10px; margin-top: 22px; }
-  .gp-doc .docline h1 { font-size: 19px; margin: 0; }
-  .gp-doc .docline span { font-size: 12px; color: #6b7280; }
-  .gp-doc .meta { display: flex; gap: 36px; flex-wrap: wrap; margin: 16px 0 6px; }
-  .gp-doc .meta div { font-size: 13px; }
-  .gp-doc .meta .l { font-size: 10.5px; color: #8a94a0; text-transform: uppercase; letter-spacing: 0.6px; }
-  .gp-doc .meta .v { font-weight: 700; margin-top: 2px; }
+  .gp-doc .gpr-brand b { font-size: 26px; letter-spacing: -0.5px; }
+  .gp-doc .gpr-brand b span { color: #2ecc71; font-weight: 400; }
+  .gp-doc .gpr-tag { font-size: 10px; letter-spacing: 2.5px; color: #8a94a0; margin-top: 2px; }
+  .gp-doc .gpr-docline { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 2px solid #2ecc71; padding-bottom: 10px; margin-top: 22px; }
+  .gp-doc .gpr-docline h1 { font-size: 19px; margin: 0; }
+  .gp-doc .gpr-docline span { font-size: 12px; color: #6b7280; }
+  .gp-doc .gpr-meta { display: flex; gap: 36px; flex-wrap: wrap; margin: 16px 0 6px; }
+  .gp-doc .gpr-meta div { font-size: 13px; }
+  .gp-doc .gpr-meta .gpr-l { font-size: 10.5px; color: #8a94a0; text-transform: uppercase; letter-spacing: 0.6px; }
+  .gp-doc .gpr-meta .gpr-v { font-weight: 700; margin-top: 2px; }
   .gp-doc h2 { font-size: 14px; margin: 26px 0 8px; color: #1a9b5a; }
   .gp-doc h3 { font-size: 12.5px; margin: 14px 0 6px; }
   .gp-doc table { border-collapse: collapse; width: 100%; }
   .gp-doc th, .gp-doc td { text-align: left; padding: 7px 10px; border-bottom: 1px solid #e8ebee; font-size: 12.5px; }
   .gp-doc th { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.6px; color: #8a94a0; }
-  .gp-doc .plant { margin-top: 8px; }
-  .gp-doc .plant__name { font-size: 16px; color: #2c3e50; margin: 26px 0 2px; border: 0; }
-  .gp-doc .plant__facts { font-size: 11.5px; color: #6b7280; margin-bottom: 10px; }
-  .gp-doc .chartcard { border: 1px solid #e8ebee; border-radius: 12px; padding: 10px 12px 8px; margin-bottom: 10px; page-break-inside: avoid; }
-  .gp-doc .chead { display: flex; align-items: center; gap: 8px; font-size: 12.5px; margin-bottom: 4px; }
-  .gp-doc .chead .cstat { margin-left: auto; font-size: 11px; color: #6b7280; font-weight: 400; }
-  .gp-doc .cdot { width: 9px; height: 9px; border-radius: 99px; display: inline-block; }
-  .gp-doc .bandnote { font-size: 10px; color: #9aa1aa; margin-top: 3px; }
-  .gp-doc .tl { border-left: 2px solid #e8ebee; margin: 6px 0 4px 64px; padding: 2px 0; }
-  .gp-doc .tl__row { display: flex; align-items: baseline; gap: 10px; margin: 9px 0; page-break-inside: avoid; }
-  .gp-doc .tl__date { width: 108px; margin-left: -124px; text-align: right; font-size: 10.5px; color: #8a94a0; flex-shrink: 0; }
-  .gp-doc .tl__dot { margin-left: -9px; font-size: 11px; background: #fff; flex-shrink: 0; }
-  .gp-doc .tl__text { font-size: 12.5px; }
-  .gp-doc .entry { border: 1px solid #e8ebee; border-radius: 10px; padding: 9px 12px; margin-bottom: 7px; font-size: 12.5px; page-break-inside: avoid; }
-  .gp-doc .edate { font-size: 10.5px; color: #8a94a0; margin-bottom: 3px; }
-  .gp-doc .entry img { max-width: 160px; border-radius: 8px; display: block; margin: 5px 0; }
-  .gp-doc .muted-sm { font-size: 11.5px; color: #8a94a0; margin: 4px 0 8px; }
-  .gp-doc .none { font-size: 12.5px; color: #8a94a0; }
-  .gp-doc .foot { margin-top: 30px; font-size: 10.5px; color: #9aa1aa; border-top: 1px solid #e8ebee; padding-top: 10px; line-height: 1.6; }`;
+  .gp-doc .gpr-plant { margin-top: 8px; }
+  .gp-doc .gpr-plant__name { font-size: 16px; color: #2c3e50; margin: 26px 0 2px; border: 0; }
+  .gp-doc .gpr-plant__facts { font-size: 11.5px; color: #6b7280; margin-bottom: 10px; }
+  .gp-doc .gpr-chartcard { border: 1px solid #e8ebee; border-radius: 12px; padding: 10px 12px 8px; margin-bottom: 10px; page-break-inside: avoid; }
+  .gp-doc .gpr-chead { display: flex; align-items: center; gap: 8px; font-size: 12.5px; margin-bottom: 4px; }
+  .gp-doc .gpr-chead .gpr-cstat { margin-left: auto; font-size: 11px; color: #6b7280; font-weight: 400; }
+  .gp-doc .gpr-cdot { width: 9px; height: 9px; border-radius: 99px; display: inline-block; }
+  .gp-doc .gpr-bandnote { font-size: 10px; color: #9aa1aa; margin-top: 3px; }
+  .gp-doc .gpr-tl { border-left: 2px solid #e8ebee; margin: 6px 0 4px 64px; padding: 2px 0; }
+  .gp-doc .gpr-tl__row { display: flex; align-items: baseline; gap: 10px; margin: 9px 0; page-break-inside: avoid; }
+  .gp-doc .gpr-tl__date { width: 108px; margin-left: -124px; text-align: right; font-size: 10.5px; color: #8a94a0; flex-shrink: 0; }
+  .gp-doc .gpr-tl__dot { margin-left: -9px; font-size: 11px; background: #fff; flex-shrink: 0; }
+  .gp-doc .gpr-tl__text { font-size: 12.5px; }
+  .gp-doc .gpr-entry { border: 1px solid #e8ebee; border-radius: 10px; padding: 9px 12px; margin-bottom: 7px; font-size: 12.5px; page-break-inside: avoid; }
+  .gp-doc .gpr-edate { font-size: 10.5px; color: #8a94a0; margin-bottom: 3px; }
+  .gp-doc .gpr-entry img { max-width: 160px; border-radius: 8px; display: block; margin: 5px 0; }
+  .gp-doc .gpr-muted-sm { font-size: 11.5px; color: #8a94a0; margin: 4px 0 8px; }
+  .gp-doc .gpr-none { font-size: 12.5px; color: #8a94a0; }
+  .gp-doc .gpr-foot { margin-top: 30px; font-size: 10.5px; color: #9aa1aa; border-top: 1px solid #e8ebee; padding-top: 10px; line-height: 1.6; }`;
 
   const body = `
-  <div class="brand"><b>Growth<span>Pulse</span></b></div>
-  <div class="tag">SMART PLANT MONITORING</div>
+  <div class="gpr-brand"><b>Growth<span>Pulse</span></b></div>
+  <div class="gpr-tag">SMART PLANT MONITORING</div>
 
-  <div class="docline">
+  <div class="gpr-docline">
     <h1>${title}</h1>
     <span>Generated ${now.toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })} at ${now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
   </div>
 
-  <div class="meta">
-    <div><div class="l">Account holder</div><div class="v">${esc(user.name)}</div></div>
-    <div><div class="l">Email</div><div class="v">${esc(user.email)}</div></div>
-    <div><div class="l">Plan</div><div class="v">${esc(tier.name)} ${esc(tier.price)}${esc(tier.period)}</div></div>
+  <div class="gpr-meta">
+    <div><div class="gpr-l">Account holder</div><div class="gpr-v">${esc(user.name)}</div></div>
+    <div><div class="gpr-l">Email</div><div class="gpr-v">${esc(user.email)}</div></div>
+    <div><div class="gpr-l">Plan</div><div class="gpr-v">${esc(tier.name)} ${esc(tier.price)}${esc(tier.period)}</div></div>
     ${periodMeta}
   </div>
 
@@ -338,19 +338,19 @@ function buildReport({ user, devices, gateways = [], alarmRules = [], settings, 
   ${devices.length ? `<table>
     <tr><th>Plant</th><th>Type</th><th>Group</th><th>Home location</th><th>Connection</th><th>Power</th><th>Status</th></tr>
     ${deviceRows}
-  </table>` : '<div class="none">No devices on this account.</div>'}
+  </table>` : '<div class="gpr-none">No devices on this account.</div>'}
 
   <h2>Gateways (${gateways.length})</h2>
   ${gateways.length ? `<table>
     <tr><th>Name</th><th>Code</th><th>Added</th></tr>
     ${gatewayRows}
-  </table>` : '<div class="none">No gateways on this account.</div>'}
+  </table>` : '<div class="gpr-none">No gateways on this account.</div>'}
 
   <h2>Alarm rules (${alarmRules.length})</h2>
   ${alarmRules.length ? `<table>
     <tr><th>Sensor</th><th>Condition</th><th>Applies to</th><th>Enabled</th></tr>
     ${alarmRows}
-  </table>` : '<div class="none">No alarm rules configured.</div>'}
+  </table>` : '<div class="gpr-none">No alarm rules configured.</div>'}
 
   <h2>Preferences</h2>
   <table>
@@ -363,7 +363,7 @@ function buildReport({ user, devices, gateways = [], alarmRules = [], settings, 
 
   ${journalBlocks ? `<h2>Growth journals</h2>${journalBlocks}` : ''}
 
-  <div class="foot">
+  <div class="gpr-foot">
     ${report ? `Sensor graphs cover ${esc(report.rangeLabel.toLowerCase())} and are averaged into chart buckets; gaps mean the device was offline.` : ''}
     This document was generated from the data stored for your GrowthPulse account.
     GrowthPulse · Smart Plant Monitoring · growthpulsecloud.com · FIU Senior Design
@@ -405,16 +405,26 @@ export async function downloadAccountPdf(opts) {
   try {
     const { default: html2pdf } = await import('html2pdf.js');
     const stamp = new Date().toISOString().slice(0, 10);
+
+    // Render as sharp as the browser allows: 3x for typical reports, easing
+    // down for very long ones so the page canvas stays inside mobile-Safari
+    // limits (~268M pixels). Never below 2x.
+    const el = host.querySelector('.gp-doc');
+    const docHeight = Math.max(el.scrollHeight, 1);
+    const maxScale = Math.sqrt(240e6 / (816 * docHeight));
+    const scale = Math.max(2, Math.min(3, maxScale));
+
     await html2pdf()
       .set({
         margin: [0.35, 0.3, 0.45, 0.3],
         filename: `GrowthPulse ${title} ${stamp}.pdf`,
-        image: { type: 'jpeg', quality: 0.95 },
-        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+        // PNG keeps text edges crisp (JPEG smears them with ringing artifacts).
+        image: { type: 'png' },
+        html2canvas: { scale, useCORS: true, backgroundColor: '#ffffff' },
         jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' },
         pagebreak: { mode: ['css', 'legacy'] },
       })
-      .from(host.querySelector('.gp-doc'))
+      .from(el)
       .save();
     return true;
   } finally {

@@ -6,6 +6,11 @@ All notable changes to GrowthPulse, the web app and the device firmware.
 
 ## Web App
 
+### v2.8.2 — June 5, 2026
+- Downloaded PDFs are much sharper: higher render resolution and lossless image encoding.
+- Fixed app styles leaking into the downloaded report (the logo rendered centered).
+- Report stats no longer count a disconnected air sensor's zero readings (the "Min 0°F" artifact).
+
 ### v2.8.1 — June 5, 2026
 - Report sheet now has two delivery buttons: "Download PDF" saves a real .pdf file directly, "Print report" opens the print dialog (paper, or sharpest save-as-PDF output).
 

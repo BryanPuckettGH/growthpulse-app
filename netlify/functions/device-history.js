@@ -62,12 +62,16 @@ export const handler = async (event) => {
       if (soilTemperatureF != null && soilTemperatureF < -100) soilTemperatureF = null;
       let airHumidity = num(d.airHumidity);
       if (airHumidity != null && airHumidity <= 0) airHumidity = null;
+      // A DHT22 that's unplugged reports temp 0 with no humidity; that zero
+      // must not drag the report's Min/Avg stats down.
+      let airTemperatureF = num(d.airTemperatureF);
+      if (airTemperatureF === 0 && airHumidity == null) airTemperatureF = null;
       const soilRaw = num(d.soilRaw);
       let soilMoisturePercent = num(d.soilMoisturePercent);
       if (soilRaw != null && soilRaw < 300) soilMoisturePercent = null;
       return {
         t: new Date(p.time).getTime(),
-        airTemperatureF: num(d.airTemperatureF),
+        airTemperatureF,
         airHumidity,
         soilTemperatureF,
         soilMoisturePercent,
