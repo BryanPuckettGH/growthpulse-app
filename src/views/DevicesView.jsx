@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useApp } from '../store/AppContext';
 import { TRANSPORTS } from '../store/helpers';
-import { TransportIcon } from '../components/UI';
+import { TransportIcon, PowerBadge } from '../components/UI';
 import { geocodePlace } from '../utils/geocode';
 import { Plus, Sprout, Lock, Pencil, Trash2, RefreshCcw, AlertTriangle, MapPin, RadioTower } from 'lucide-react';
 import AddDeviceSheet from '../components/AddDeviceSheet';
@@ -16,33 +16,56 @@ export default function DevicesView() {
   const [editId, setEditId] = useState(null);
   const atLimit = devices.length >= tier.deviceLimit;
 
+  // Optional grouping: devices with a group render under their group's
+  // heading; ungrouped ones go under "Other plants" (or flat if no groups).
+  const groupNames = [...new Set(devices.map((d) => d.group).filter(Boolean))];
+  const ungrouped = devices.filter((d) => !d.group);
+
+  const card = (d) => {
+    const t = TRANSPORTS[d.transport] || TRANSPORTS.wifi;
+    return (
+      <div key={d.id} className={`device ${d.id === selectedDeviceId ? 'selected' : ''}`} onClick={() => setSelectedDeviceId(d.id)}>
+        <div className="device__avatar" style={{ background: t.color + '1a' }}><Sprout size={22} color={t.color} /></div>
+        <div className="device__main">
+          <div className="device__name">{d.name}</div>
+          <div className="device__meta">
+            <span className="badge"><TransportIcon name={t.icon} color={t.color} />{t.label}</span>
+            <PowerBadge reading={d.reading} />
+            <span><span className="dot" style={{ background: d.online ? '#2ecc71' : '#cfd3d8', marginRight: 5 }} />{d.online ? 'Online' : 'Offline'}</span>
+            {d.location && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><MapPin size={11} />{d.location}</span>}
+          </div>
+        </div>
+        <div className="device__reading">
+          <div className="device__big">{d.hasData ? `${d.reading.soilMoisturePercent}%` : '—'}</div>
+          <div className="device__small">{d.hasData ? 'moisture' : 'connecting'}</div>
+        </div>
+        <button className="device__edit" onClick={(e) => { e.stopPropagation(); setEditId(d.id); }} aria-label="Edit device"><Pencil size={16} /></button>
+      </div>
+    );
+  };
+
   return (
     <div>
       <div className="section-title">Your devices ({devices.length}{tier.deviceLimit < 99 ? ` of ${tier.deviceLimit}` : ''})</div>
 
-      <div className="cardgrid">
-      {devices.map((d) => {
-        const t = TRANSPORTS[d.transport] || TRANSPORTS.wifi;
-        return (
-          <div key={d.id} className={`device ${d.id === selectedDeviceId ? 'selected' : ''}`} onClick={() => setSelectedDeviceId(d.id)}>
-            <div className="device__avatar" style={{ background: t.color + '1a' }}><Sprout size={22} color={t.color} /></div>
-            <div className="device__main">
-              <div className="device__name">{d.name}</div>
-              <div className="device__meta">
-                <span className="badge"><TransportIcon name={t.icon} color={t.color} />{t.label}</span>
-                <span><span className="dot" style={{ background: d.online ? '#2ecc71' : '#cfd3d8', marginRight: 5 }} />{d.online ? 'Online' : 'Offline'}</span>
-                {d.location && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><MapPin size={11} />{d.location}</span>}
-              </div>
+      {groupNames.length === 0 ? (
+        <div className="cardgrid">{devices.map(card)}</div>
+      ) : (
+        <>
+          {groupNames.map((g) => (
+            <div key={g}>
+              <div className="section-title" style={{ marginTop: 10 }}>{g}</div>
+              <div className="cardgrid">{devices.filter((d) => d.group === g).map(card)}</div>
             </div>
-            <div className="device__reading">
-              <div className="device__big">{d.hasData ? `${d.reading.soilMoisturePercent}%` : '—'}</div>
-              <div className="device__small">{d.hasData ? 'moisture' : 'connecting'}</div>
-            </div>
-            <button className="device__edit" onClick={(e) => { e.stopPropagation(); setEditId(d.id); }} aria-label="Edit device"><Pencil size={16} /></button>
-          </div>
-        );
-      })}
-      </div>
+          ))}
+          {ungrouped.length > 0 && (
+            <>
+              <div className="section-title" style={{ marginTop: 10 }}>Other plants</div>
+              <div className="cardgrid">{ungrouped.map(card)}</div>
+            </>
+          )}
+        </>
+      )}
 
       {atLimit ? (
         <button className="btn btn--ghost" style={{ marginTop: 6 }} onClick={openPlans}>
@@ -128,16 +151,18 @@ function GatewaySheet({ onClose, onAdd }) {
 }
 
 function DeviceEditSheet({ device, onClose }) {
-  const { updateDevice, removeDevice, factoryResetDevice } = useApp();
+  const { updateDevice, removeDevice, factoryResetDevice, devices } = useApp();
   const [name, setName] = useState(device.name);
   const [location, setLocation] = useState(device.location);
   const [transport, setTransport] = useState(device.transport);
+  const [group, setGroup] = useState(device.group || '');
+  const groupSuggestions = [...new Set(devices.map((x) => x.group).filter(Boolean))];
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState(null); // null | 'remove' | 'reset'
 
   const save = async () => {
     setBusy(true);
-    let patch = { name: name.trim() || device.name, transport };
+    let patch = { name: name.trim() || device.name, transport, group: group.trim() || undefined };
     const loc = location.trim();
     if (loc && loc !== device.location) {
       // Re-pin the plant's home: geocode the new place for weather.
@@ -203,6 +228,12 @@ function DeviceEditSheet({ device, onClose }) {
         <p className="muted" style={{ fontSize: 12, margin: '-6px 2px 10px' }}>
           Weather and rain alerts use the plant's home, not your phone's location.
         </p>
+
+        <div className="fieldlabel">Group (optional)</div>
+        <input className="input" list="gp-groups" value={group} onChange={(e) => setGroup(e.target.value)} placeholder="e.g. Greenhouse, Backyard" />
+        <datalist id="gp-groups">
+          {groupSuggestions.map((g) => <option key={g} value={g} />)}
+        </datalist>
 
         <div className="fieldlabel">Connection</div>
         <div className="choices">

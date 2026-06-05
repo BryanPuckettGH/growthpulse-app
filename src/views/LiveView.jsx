@@ -4,7 +4,7 @@ import {
   METRICS, PLANTS, statusOf, healthScore, recommendations, rangesForDevice, TRANSPORTS,
   displayValue, displayUnit, trendOf, metricConnected,
 } from '../store/helpers';
-import { MetricIcon, TransportIcon, Gauge, statusColor } from '../components/UI';
+import { MetricIcon, TransportIcon, Gauge, statusColor, PowerBadge } from '../components/UI';
 import Chart from '../components/Chart';
 import WeatherCard from '../components/WeatherCard';
 import PlantPicker from '../components/PlantPicker';
@@ -148,7 +148,8 @@ export default function LiveView() {
             <div className="bar"><div className="bar__fill" style={{ width: `${health}%`, background: healthColor }} /></div>
             <div className="device__meta" style={{ marginTop: 12 }}>
               <span className="badge"><TransportIcon name={t.icon} color={t.color} />{t.label}</span>
-              <span>· {selectedDevice.location}</span>
+              <PowerBadge reading={r} />
+              {selectedDevice.location && <span>· {selectedDevice.location}</span>}
             </div>
           </div>
         </div>

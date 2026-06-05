@@ -24,12 +24,16 @@ export const handler = async (event) => {
     }
     const s = await res.json();
     const num = (k) => (s[k] && typeof s[k].value === 'number' ? s[k].value : null);
+    const bool = (k) => (s[k] && typeof s[k].value === 'boolean' ? s[k].value : null);
     const reading = {
       airTemperatureF: num('airTemperatureF'),
       airHumidity: num('airHumidity'),
       soilTemperatureF: num('soilTemperatureF'),
       soilRaw: num('soilRaw'),
       soilMoisturePercent: num('soilMoisturePercent'),
+      // Battery-powered units (future firmware) report these; AC units don't.
+      batteryPct: num('batteryPct'),
+      charging: bool('charging'),
       time: s.soilMoisturePercent ? new Date(s.soilMoisturePercent.time).getTime() : Date.now(),
     };
     return {

@@ -10,7 +10,8 @@ import SettingsView from './views/SettingsView';
 import PlansSheet from './components/PlansSheet';
 import Onboarding from './components/Onboarding';
 import { activeAlerts, METRICS } from './store/helpers';
-import { Activity, LineChart, Bell, LayoutGrid, Settings, ChevronDown } from 'lucide-react';
+import { openPlantReport } from './utils/report';
+import { Activity, LineChart, Bell, LayoutGrid, Settings, ChevronDown, FileText } from 'lucide-react';
 
 const TABS = [
   { id: 'live', label: 'Live', icon: Activity, View: LiveView },
@@ -39,7 +40,7 @@ function useTheme(theme) {
 }
 
 function Shell() {
-  const { user, selectedDevice, devices, alarmRules, settings, showPlans, closePlans } = useApp();
+  const { user, selectedDevice, devices, alarmRules, settings, showPlans, closePlans, journals, weather } = useApp();
   const [tab, setTab] = useState('live');
   const [toast, setToast] = useState(null);
   const prevKeys = useRef(new Set());
@@ -86,6 +87,13 @@ function Shell() {
           </div>
           <div className="appbar__sub">{selectedDevice.location}</div>
         </div>
+        <button
+          className="iconbtn"
+          title="Share a plant report (save as PDF or print)"
+          onClick={() => openPlantReport({ device: selectedDevice, journal: journals[selectedDevice.id] || [], weather, settings, user })}
+        >
+          <FileText size={18} />
+        </button>
         <button className="iconbtn avatar" title="Account" onClick={() => setTab('settings')}>
           {user.name.charAt(0).toUpperCase()}
         </button>

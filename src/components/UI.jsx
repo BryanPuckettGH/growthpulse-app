@@ -1,6 +1,7 @@
 /* Small reusable UI building blocks: icons, pills, toggle, slider,
    stepper, gauge, badge. Kept in one file so the views stay short. */
-import { Thermometer, Droplets, Sprout, Waves, Wifi, RadioTower, CloudRain } from 'lucide-react';
+import { Thermometer, Droplets, Sprout, Waves, Wifi, RadioTower, CloudRain, Plug, BatteryFull, BatteryMedium, BatteryLow, BatteryCharging } from 'lucide-react';
+import { powerInfo } from '../store/helpers';
 
 const METRIC_ICONS = { temp: Thermometer, humidity: Droplets, moisture: Sprout, soil: Waves, rain: CloudRain };
 const TRANSPORT_ICONS = { wifi: Wifi, lora: RadioTower };
@@ -13,6 +14,21 @@ export function MetricIcon({ name, size = 18, color }) {
 export function TransportIcon({ name, size = 13, color }) {
   const I = TRANSPORT_ICONS[name] || Wifi;
   return <I size={size} color={color} strokeWidth={2.2} />;
+}
+
+// Power chip: "AC" for plugged-in units, battery % (with charging bolt) otherwise.
+export function PowerBadge({ reading, size = 13 }) {
+  const p = powerInfo(reading);
+  if (p.mode === 'ac') {
+    return <span className="badge"><Plug size={size} />AC power</span>;
+  }
+  const Icon = p.charging ? BatteryCharging : p.pct > 50 ? BatteryFull : p.pct > 20 ? BatteryMedium : BatteryLow;
+  const color = p.charging ? '#13a4ff' : p.pct > 50 ? '#2ecc71' : p.pct > 20 ? '#f4a52b' : '#ef4444';
+  return (
+    <span className="badge" style={{ color }}>
+      <Icon size={size + 2} color={color} />{p.pct}%{p.charging ? ' charging' : ''}
+    </span>
+  );
 }
 
 const STATUS_COLORS = { good: '#2ecc71', warn: '#f4a52b', critical: '#ef4444' };

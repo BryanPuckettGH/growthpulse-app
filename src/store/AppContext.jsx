@@ -177,9 +177,9 @@ export function AppProvider({ children }) {
     }
     return () => { cancelled = true; };
   }, [settings.units, pinnedGeo && pinnedGeo.lat, pinnedGeo && pinnedGeo.lon]); // eslint-disable-line react-hooks/exhaustive-deps
-  const deviceSig = devices.map((d) => `${d.id}|${d.name}|${d.location}|${d.transport}|${d.plant}|${JSON.stringify(d.irrigation)}|${d.losantDeviceId || ''}|${d.geo ? d.geo.lat + ',' + d.geo.lon : ''}`).join(',');
+  const deviceSig = devices.map((d) => `${d.id}|${d.name}|${d.location}|${d.transport}|${d.plant}|${JSON.stringify(d.irrigation)}|${d.losantDeviceId || ''}|${d.geo ? d.geo.lat + ',' + d.geo.lon : ''}|${d.group || ''}`).join(',');
   useEffect(() => {
-    save('devices', devices.map((d) => ({ id: d.id, name: d.name, location: d.location, transport: d.transport, plant: d.plant, irrigation: d.irrigation, losantDeviceId: d.losantDeviceId, geo: d.geo })));
+    save('devices', devices.map((d) => ({ id: d.id, name: d.name, location: d.location, transport: d.transport, plant: d.plant, irrigation: d.irrigation, losantDeviceId: d.losantDeviceId, geo: d.geo, group: d.group })));
   }, [deviceSig]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const addDevice = useCallback((name, location, transport) => {

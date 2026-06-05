@@ -57,6 +57,13 @@ export function statusOf(key, value, ranges) {
   return 'critical';
 }
 
+// Power state for a device. Units on USB/AC don't report a battery level;
+// battery-powered units (future firmware) send batteryPct and charging.
+export function powerInfo(reading) {
+  if (!reading || reading.batteryPct == null) return { mode: 'ac' };
+  return { mode: 'battery', pct: Math.round(reading.batteryPct), charging: !!reading.charging };
+}
+
 // Whether a sensor is actually plugged in and reporting something sane.
 // Disconnected sensors have telltale signatures: the DS18B20 reports -127C
 // (-196.6F), the DHT22 reports nothing (null), and a floating soil probe
