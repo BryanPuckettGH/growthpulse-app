@@ -1,13 +1,19 @@
 import { useApp } from '../store/AppContext';
 import { Pills, Toggle } from '../components/UI';
+import { openAccountExport } from '../utils/accountExport';
 import { LogOut, Download } from 'lucide-react';
 import pkg from '../../package.json';
 
 export default function SettingsView() {
   const { settings, updateSettings, user, logout, tier, openPlans, devices, alarmRules, journals, gateways, tierId } = useApp();
 
-  // GDPR-style export: everything tied to this account, as one JSON file.
-  const exportData = () => {
+  // The customer-facing export: a branded PDF-ready document.
+  const exportPdf = () => {
+    openAccountExport({ user, devices, gateways, alarmRules, settings, journals, tierId });
+  };
+
+  // Machine-readable copy (data portability); secondary on purpose.
+  const exportJson = () => {
     const data = {
       exportedAt: new Date().toISOString(),
       account: { name: user.name, email: user.email, growerType: user.growerType, plan: tierId },
@@ -137,9 +143,12 @@ export default function SettingsView() {
             <div className="muted">{user.email}</div>
           </div>
         </div>
-        <button className="btn btn--ghost" onClick={exportData}>
-          <Download size={15} style={{ verticalAlign: '-3px', marginRight: 6 }} />Download my data
+        <button className="btn btn--ghost" onClick={exportPdf}>
+          <Download size={15} style={{ verticalAlign: '-3px', marginRight: 6 }} />Download my data (PDF)
         </button>
+        <p className="muted center" style={{ margin: '8px 0 0', fontSize: 12 }}>
+          Need it for software? <span style={{ color: 'var(--green-d)', fontWeight: 700, cursor: 'pointer' }} onClick={exportJson}>Machine-readable copy (JSON)</span>
+        </p>
         <button className="btn btn--ghost" style={{ marginTop: 10 }} onClick={logout}>
           <LogOut size={15} style={{ verticalAlign: '-3px', marginRight: 6 }} />Log out
         </button>
