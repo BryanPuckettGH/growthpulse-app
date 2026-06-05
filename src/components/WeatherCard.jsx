@@ -1,4 +1,5 @@
 import { useApp } from '../store/AppContext';
+import SetLocationInline from './SetLocationInline';
 import { Sun, Cloud, CloudRain, CloudSnow, CloudDrizzle, MapPin } from 'lucide-react';
 
 // Map Open-Meteo WMO weather codes to a label and icon.
@@ -18,10 +19,27 @@ function describe(code) {
 // The "virtual rain gauge" from the proposal. Reads the shared weather from the
 // store (which is also what rain-aware watering uses).
 export default function WeatherCard() {
-  const { weather, settings } = useApp();
+  const { weather, settings, selectedDevice } = useApp();
 
   if (!weather) {
     return <div className="card"><div className="skeleton" style={{ height: 60 }} /></div>;
+  }
+
+  // Location is optional. If this plant has none, invite the user to add one
+  // rather than guessing a city or asking the browser for their position.
+  if (weather.needsLocation) {
+    return (
+      <div className="card">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+          <CloudRain size={26} color="var(--blue)" />
+          <div>
+            <div style={{ fontWeight: 700 }}>Add this plant's location for weather</div>
+            <div className="muted">Local forecast, rain alerts, and rain delay use the plant's home. It's optional, and we never use your phone's location.</div>
+          </div>
+        </div>
+        <SetLocationInline device={selectedDevice} />
+      </div>
+    );
   }
   if (weather.error) {
     return <div className="card"><div className="muted">Weather unavailable right now.</div></div>;
@@ -41,7 +59,7 @@ export default function WeatherCard() {
             {weather.temp}{unit} <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink-3)' }}>{cond}</span>
           </div>
           <div className="device__meta">
-            <MapPin size={12} /> {weather.label}{weather.pinned ? ' (plant’s home)' : ''} · {weather.rainChance}% rain · high {weather.high}{unit}
+            <MapPin size={12} /> {weather.label} · {weather.rainChance}% rain · high {weather.high}{unit}
           </div>
         </div>
       </div>

@@ -70,8 +70,10 @@ function RainPausePrompt() {
   const irr = selectedDevice.irrigation || {};
   const paused = irr.pausedUntil && irr.pausedUntil > Date.now();
   const rainy = weather && weather.rainChance >= 50;
+  const rainDelayOn = irr.rainDelay && selectedDevice.geo;
 
-  if (!tier.irrigation || !rainy || paused || dismissed) return null;
+  // Only nudge to pause watering if rain delay is on (which requires location).
+  if (!tier.irrigation || !rainDelayOn || !rainy || paused || dismissed) return null;
 
   const pause = (hours) => setIrrigation(selectedDevice.id, { pausedUntil: Date.now() + hours * 3600 * 1000 });
 

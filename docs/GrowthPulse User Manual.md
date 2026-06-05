@@ -92,10 +92,13 @@ Your GrowthPulse connects to the internet through your home Wi-Fi. It only needs
 
 - **How it connects**: Wi-Fi (most units) or through a LoRaWAN gateway (Farm Kit).
 - **Plant name**: whatever you like, "Kitchen Basil," "Greenhouse Tomatoes."
-- **The plant's home location**: a city or ZIP code. This matters! Weather and rain alerts follow the plant's home, not your phone, so a vacation on the other side of the world never confuses your rain forecast.
 - **The pairing code**: the large code on your unit's screen.
 
 A code that does not match a real GrowthPulse unit is rejected, so a typo cannot create a ghost device.
+
+**Location is optional.** You are never asked for your location to set up a plant, and the app never reads your phone's GPS. A plant's home location (a city or ZIP) is only used by the weather features, the forecast, rain alerts, and rain delay. If you want those, you can add a location any time from the plant's weather card or its edit screen. If you would rather not share where you live, simply skip it; everything else works exactly the same.
+
+**Your plants follow your account.** Devices are stored with your account in the cloud, not in one browser. Sign in on a new phone or computer and your plants, names, locations, and groups are already there. A pairing code can also only be claimed by one account at a time, so a unit always has a single clear owner.
 
 **Privacy:** every account's plants, history, journals, and alarms are private to that account.
 
@@ -111,9 +114,11 @@ The Live tab is your plant's homepage.
 
 **Plant profile.** Tap the plant bar to tell GrowthPulse what you are growing, basil, tomatoes, succulents, ferns, and more. Every plant type has its own ideal ranges, so the colors, health score, and advice are tuned to that plant, not a generic average.
 
-**Weather rain gauge.** Shows current weather at your plant's home location: temperature, conditions, rain chance, and the day's high. When rain is likely, GrowthPulse suggests skipping a watering. When intense sun and heat are coming, it warns you that soil may dry out faster. (Available on Plus and above.)
+**Weather rain gauge.** Shows current weather at your plant's home location: temperature, conditions, rain chance, and the day's high. When rain is likely, GrowthPulse suggests skipping a watering. When intense sun and heat are coming, it warns you that soil may dry out faster. (Available on Plus and above.) If you have not given this plant a location, the card simply invites you to add one, a city or ZIP, right there; nothing is forced and your phone's location is never used.
 
-**Automated watering.** With a Pro plan and a pump accessory, GrowthPulse can water automatically when soil gets too dry, and it is smart enough to offer a pause when rain is on the way.
+**Automated watering.** With a Pro plan and a pump accessory, GrowthPulse can water automatically when soil gets too dry.
+
+**Rain delay.** On Pro, you can turn on **rain delay** so automatic watering is skipped when rain is in the local forecast, no overwatering right before a storm. Because rain delay has to look up the forecast where the plant lives, it needs that plant's home location. If the plant has no location yet, the rain delay switch explains why and lets you add one (a city or ZIP) on the spot; once it is set, rain delay turns on. This is the one feature that requires a location, and it tells you exactly which plant still needs one.
 
 **Sensors row.** Every sensor with its live reading and a trend arrow. Tap any of them for a detailed chart with max, average, and minimum. A disconnected sensor is shown in gray as "not connected."
 
@@ -174,13 +179,32 @@ Wi-Fi works wonderfully indoors and around the house. For fields, large gardens,
 - **Theme**: light, dark, or automatic with your device.
 - **Refresh rate**: how often the app updates readings, from every second to every 5 minutes. Second-by-second rates apply to Wi-Fi devices; LoRaWAN nodes check in every few minutes by design. Remember: on battery-powered units, faster updates mean shorter battery life.
 - **Notifications**: enable email and SMS alerts and set the addresses they go to.
-- **Account**: your name, grower type, email, and sign out.
+- **Account**: your name, grower type, email, **Download report (PDF)**, and sign out.
 
 ---
 
-# Sharing a Plant Report
+# Reports
 
-Tap the **document icon** in the top bar to generate a polished report for the selected plant: current readings, recent minimums, averages and maximums, the health score, weather at the plant's home, and the latest journal entries with photos. Your browser's print dialog opens automatically, choose **Save as PDF** to share it, or print it on paper. Great for plant sitters, garden clubs, agronomy classes, or just showing off.
+GrowthPulse turns your sensor history into a polished, branded PDF report you can keep, print, or share, complete with graphs.
+
+**Where to find it.** Open **Settings** and tap **Download report (PDF)**. (Note: this replaced the old plain-text data export; the report is what 99% of people actually want.)
+
+**Choose what goes in it.** A short options screen lets you tailor the report before it builds:
+
+- **Time period**: Last 24 hours, Last 7 days, Last 30 days, **Everything** (all the way back to when each plant first connected), or **Custom dates** with your own from/to.
+- **Plants**: if you have more than one plant, tick exactly which ones to include.
+- **Sensors**: include or leave out Temperature, Humidity, Soil Moisture, and Soil Temp, your choice.
+
+**What's in the report.** For each plant you get a line chart per sensor across the whole period, with the plant's ideal range shaded green and the minimum, average, and maximum called out. Gaps in a line mean the device was offline then; a sensor that was unplugged is labeled honestly instead of drawing a fake line. Below the graphs is an **activity timeline** (when the plant was added, first data, your journal notes) and a clean summary of your devices, alarms, and settings. Long periods are automatically averaged so the graphs stay readable.
+
+**Two ways to get it.**
+
+- **Download PDF** saves the file straight to your device, one tap, no dialog.
+- **Print report** opens your browser's print view, where you can save as PDF with the sharpest possible text or print on paper.
+
+A loading screen with a spinner shows while the report builds (it can take a few seconds for long periods or the highest-quality rendering), so you know it's working, no need to tap again or refresh.
+
+Great for plant sitters, garden clubs, agronomy classes, landlords, or just tracking how your plants are doing over a season.
 
 ---
 
@@ -204,7 +228,9 @@ Tap the **document icon** in the top bar to generate a polished report for the s
 | The pairing code is rejected | Codes only contain letters and numbers, check for typos (the code is on the unit's screen). |
 | Readings look stuck | Check that the unit's screen shows ON. Pull the power and plug it back in, it reconnects by itself. |
 | I moved or changed my router | Hold PRG 3 seconds and run Wi-Fi setup again. Nothing else changes. |
-| The report does not open | Your browser blocked the pop-up. Allow pop-ups for growthpulsecloud.com once. |
+| Download PDF seems slow the first time | The high-quality renderer wakes up on the first use, then is quick. The loading spinner means it's working, just wait; it will save automatically. |
+| Print report does not open | Your browser blocked the pop-up. Allow pop-ups for growthpulsecloud.com once, or use Download PDF instead. |
+| I want rain delay but the switch is off | Rain delay needs the plant's location for the forecast. The switch shows a box to add a city or ZIP; once saved, it turns on. |
 
 ---
 
@@ -214,7 +240,9 @@ Tap the **document icon** in the top bar to generate a polished report for the s
 
 **Can multiple people watch the same plants?** Each account has its own plants. Family-sharing is on our roadmap.
 
-**Does the app track my location?** No. Weather uses the home location you typed for each plant. If you skip it, the app falls back to a general location estimate from your browser, which you can decline.
+**Does the app track my location?** No, and it never asks your browser or phone for it. Weather uses only the home location you choose to type for a plant (a city or ZIP). If you skip it, weather and rain delay are simply off for that plant and nothing else changes. Location is always optional and always something you enter yourself.
+
+**Can I sign in on more than one device?** Yes. Your plants live with your account in the cloud, so signing in on a new phone or computer shows all your plants, names, locations, and groups right away.
 
 **How accurate are the sensors?** Air temperature is typically within ±0.9°F, humidity within ±2-5%, and soil readings are tuned for trend accuracy, watching change over time, which is what plant care decisions actually need.
 

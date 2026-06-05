@@ -224,6 +224,7 @@ input[type='range'].slider::-moz-range-thumb {
 }
 .switch input:checked + .switch__track { background: var(--green); }
 .switch input:checked + .switch__track + .switch__thumb { transform: translateX(20px); }
+.switch--disabled { cursor: not-allowed; opacity: 0.45; }
 
 /* ---------- Badges ---------- */
 .badge {

@@ -1,6 +1,7 @@
 import { useApp } from '../store/AppContext';
 import { Pills, Slider, Stepper, Toggle } from './UI';
-import { Droplet, CloudRain } from 'lucide-react';
+import SetLocationInline from './SetLocationInline';
+import { Droplet, CloudRain, MapPin } from 'lucide-react';
 
 // Watering control, modeled on a grow-controller's Control tab. Drives the
 // relay + pump from the irrigation kit. Demo runs a simulated pump; real
@@ -11,8 +12,18 @@ export default function IrrigationCard() {
   const running = selectedDevice.pumpRunning;
   const moisture = selectedDevice.reading.soilMoisturePercent;
   const paused = irr.pausedUntil && irr.pausedUntil > Date.now();
+  const hasLocation = !!selectedDevice.geo;
+  const rainDelayOn = !!irr.rainDelay && hasLocation;
 
   const set = (patch) => setIrrigation(selectedDevice.id, patch);
+
+  // Rain delay needs the local forecast, which needs the plant's location.
+  // Turning it on without a location is blocked and explained, not silently
+  // ignored — so customers know exactly why location matters here.
+  const toggleRainDelay = (v) => {
+    if (v && !hasLocation) return; // gate handles the explanation below
+    set({ rainDelay: v });
+  };
 
   return (
     <>
@@ -46,7 +57,10 @@ export default function IrrigationCard() {
             <div className="field__row"><span className="muted">Water below</span><span className="field__value">{irr.targetMoisture}%</span></div>
             <Slider min={5} max={80} value={irr.targetMoisture} onChange={(v) => set({ targetMoisture: v })} />
             <div className="ticks"><span>5%</span><span>80%</span></div>
-            <p className="muted" style={{ marginTop: 8 }}>Waters automatically when soil drops below {irr.targetMoisture}%. Skips when rain is in the forecast.</p>
+            <p className="muted" style={{ marginTop: 8 }}>
+              Waters automatically when soil drops below {irr.targetMoisture}%.
+              {rainDelayOn ? ' Skips watering when rain is in the forecast.' : ''}
+            </p>
           </>
         )}
 
@@ -62,6 +76,37 @@ export default function IrrigationCard() {
         <button className="btn btn--blue" style={{ marginTop: 14 }} disabled={running} onClick={() => runPump(selectedDevice.id, irr.durationSec)}>
           <Droplet size={16} style={{ verticalAlign: '-3px', marginRight: 6 }} />{running ? 'Watering...' : 'Water now'}
         </button>
+      </div>
+
+      {/* Rain delay: skip watering when rain is forecast. Needs the plant's
+          location, so this is where we ask for it and explain why. */}
+      <div className="card" style={{ marginTop: 12 }}>
+        <div className="field__row">
+          <div style={{ paddingRight: 12 }}>
+            <div className="field__label"><CloudRain size={15} style={{ verticalAlign: '-2px', marginRight: 6, color: 'var(--blue)' }} />Rain delay</div>
+            <div className="muted">Skip automatic watering when rain is in the local forecast, so you never overwater before a storm.</div>
+          </div>
+          <Toggle checked={rainDelayOn} onChange={toggleRainDelay} disabled={!hasLocation} />
+        </div>
+
+        {!hasLocation && (
+          <div className="warnbox" style={{ marginTop: 14, marginBottom: 0 }}>
+            <MapPin size={18} color="var(--blue)" />
+            <div style={{ width: '100%' }}>
+              <div style={{ fontWeight: 700, marginBottom: 2 }}>Add a location to use rain delay</div>
+              <p className="muted" style={{ margin: '0 0 10px' }}>
+                <b>{selectedDevice.name}</b> doesn't have a location yet. Rain delay checks the forecast where this
+                plant lives, so it needs the plant's home location (a city or ZIP, not your phone's GPS) to work.
+              </p>
+              <SetLocationInline device={selectedDevice} cta="Save & enable" onDone={() => set({ rainDelay: true })} />
+            </div>
+          </div>
+        )}
+        {hasLocation && (
+          <p className="muted" style={{ fontSize: 12, margin: '10px 2px 0' }}>
+            <MapPin size={12} style={{ verticalAlign: '-2px', marginRight: 4 }} />Using {selectedDevice.location || 'this plant’s location'} for the forecast.
+          </p>
+        )}
       </div>
     </>
   );

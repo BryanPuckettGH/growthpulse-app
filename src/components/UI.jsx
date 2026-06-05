@@ -58,10 +58,10 @@ export function Pills({ options, value, onChange, blue }) {
   );
 }
 
-export function Toggle({ checked, onChange }) {
+export function Toggle({ checked, onChange, disabled }) {
   return (
-    <label className="switch">
-      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+    <label className={`switch${disabled ? ' switch--disabled' : ''}`}>
+      <input type="checkbox" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
       <span className="switch__track" />
       <span className="switch__thumb" />
     </label>

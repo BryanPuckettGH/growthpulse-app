@@ -269,17 +269,15 @@ export function AppProvider({ children }) {
         })
         .catch(() => { if (!cancelled) setWeather({ error: true }); });
     };
-    const DEF = { lat: 25.7617, lon: -80.1918, label: 'Miami, FL' };
+    // Weather follows the plant's own home location. Location is optional: we
+    // never prompt the browser for the user's position and never invent a
+    // default city. If this plant has no location, weather simply reports
+    // "needs location" and the card invites the user to add one — purely so
+    // customers who don't want to share where they live aren't forced to.
     if (pinnedGeo) {
       fetchFor(pinnedGeo.lat, pinnedGeo.lon, pinnedGeo.label);
-    } else if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => fetchFor(pos.coords.latitude, pos.coords.longitude, 'Your location'),
-        () => fetchFor(DEF.lat, DEF.lon, DEF.label),
-        { timeout: 5000 }
-      );
     } else {
-      fetchFor(DEF.lat, DEF.lon, DEF.label);
+      setWeather({ needsLocation: true });
     }
     return () => { cancelled = true; };
   }, [settings.units, pinnedGeo && pinnedGeo.lat, pinnedGeo && pinnedGeo.lon]); // eslint-disable-line react-hooks/exhaustive-deps

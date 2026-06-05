@@ -8,8 +8,11 @@ GrowthPulse is a complete consumer IoT product: a sensor node a customer plugs i
 Sensors (DS18B20, DHT22, capacitive soil probe)
    -> ESP32-S3 firmware (GP_Provisioning.ino)
    -> MQTT over the customer's Wi-Fi
-   -> Losant device cloud (stores state, runs alert workflows)
-   -> Netlify serverless function device-state.js  (API token held server-side)
+   -> Losant device cloud (stores live state + full time-series history, runs alert workflows)
+   -> Netlify serverless functions  (Losant tokens held server-side):
+        device-state.js    live composite state (every refresh tick)
+        device-history.js  time-series history for report graphs
+        render-pdf.js      headless-Chrome vector PDF of a report
    -> React web app at growthpulsecloud.com
    -> the customer
 ```
@@ -503,6 +506,40 @@ Reading it as a product artifact: this table **is the factory database**. Every 
 
 Why the anon key is allowed to be public: it is designed that way by Supabase; RLS policies are the enforcement layer. The key ships in the browser bundle (it is a `VITE_` variable) and grants exactly what the policies say and nothing more.
 
+## 6.3 The devices table: cloud-authoritative ownership
+
+The registry says which codes are valid; the **devices** table says who owns what. It makes claims cloud-authoritative (a claim follows the account to any browser instead of living in one browser's localStorage), enforces one-owner-per-unit, and gives the command endpoint something to authorize against. Schema as deployed (`docs/growthpulse-devices-schema.sql`):
+
+```sql
+create table if not exists devices (
+  id                uuid primary key default gen_random_uuid(),
+  user_id           uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  claim_code        text not null unique,           -- one account per unit
+  losant_device_id  text not null,
+  name              text, location text, geo jsonb, grp text,
+  transport         text default 'wifi', plant text default 'generic',
+  irrigation        jsonb,
+  created_at        timestamptz default now()
+);
+
+alter table devices enable row level security;
+
+create policy "owner reads"   on devices for select to authenticated using (auth.uid() = user_id);
+create policy "owner inserts" on devices for insert to authenticated with check (auth.uid() = user_id);
+create policy "owner updates" on devices for update to authenticated using (auth.uid() = user_id);
+create policy "owner deletes" on devices for delete to authenticated using (auth.uid() = user_id);
+```
+
+Notes that matter:
+
+- **`claim_code` is `UNIQUE`**, so a second account claiming the same code hits a `23505` violation, which the store surfaces as "already claimed by another account." That is claim exclusivity in one constraint.
+- **`grp`** is the column name (`group` is a SQL reserved word); the app maps `r.grp <-> device.group`.
+- **`geo` and `irrigation` are `jsonb`**, so the plant's home coordinates and the full watering config (including `rainDelay`) ride in the row.
+- **Per-user RLS on all four verbs** means the browser talks to the table directly with the anon key and can still only ever see or change its own rows; there is no trusted server in this path, the database is the guard.
+- **`created_at`** is read into the device as `claimedAt`, which drives the report's "Everything" range and the activity timeline.
+
+A one-time migration lifts pre-ownership local claims into the table on first load: for each locally-stored claim it recovers the `claim_code` from the registry, inserts the row, and remaps that browser's journals and device-scoped alarms onto the new cloud id.
+
 ---
 
 # 7. The Backend (Netlify Functions)
@@ -575,7 +612,20 @@ export const handler = async (event) => {
 };
 ```
 
-Three defenses: POST only, a one-entry command allowlist, and the dedicated write token. Known and documented gap: the function does not yet verify the caller owns the device; that requires the server-side ownership table (Roadmap item 2) after which the function should check the requester's Supabase JWT against a `devices` table before sending.
+Four defenses now: POST only, a one-entry command allowlist, the dedicated write token, **and an ownership check** (the former gap, now closed by §6.3). Before sending anything, the function takes the caller's forwarded Supabase session and queries the `devices` table for a row matching this `losant_device_id`; RLS returns only rows the caller owns, so zero rows means 403 and no auth header means 401:
+
+```js
+const callerAuth = event.headers.authorization;          // the user's Supabase JWT
+if (!callerAuth) return { statusCode: 401, ... };         // must be signed in
+const own = await fetch(
+  `${supaUrl}/rest/v1/devices?losant_device_id=eq.${deviceId}&select=id`,
+  { headers: { apikey: supaKey, Authorization: callerAuth } });
+const rows = own.ok ? await own.json() : [];
+if (rows.length === 0) return { statusCode: 403, ... };   // not your device
+// ...only now send the Losant command
+```
+
+The browser supplies the header from its live session (`factoryResetDevice` calls `supabase.auth.getSession()` and sends `Authorization: Bearer <access_token>`). The database, via RLS, is the authority; the function just relays its verdict.
 
 ## 7.3 Environment variables, the complete set
 
@@ -584,10 +634,46 @@ Three defenses: POST only, a one-entry command allowlist, and the dedicated writ
 | VITE_SUPABASE_URL | browser bundle | Supabase project URL |
 | VITE_SUPABASE_ANON_KEY | browser bundle | public anon key; RLS enforces access |
 | LOSANT_APP_ID | functions only | Losant application id |
-| LOSANT_API_TOKEN | functions only, marked secret | read-only state token |
+| LOSANT_API_TOKEN | functions only, marked secret | read-only state token (also serves history queries) |
 | LOSANT_COMMAND_TOKEN | functions only, marked secret | command-capable token |
 
-Set in Netlify under Site configuration, Environment variables; locally in the gitignored `.env`. The `VITE_` prefix is the line between public and private, enforced by Vite at build time.
+Set in Netlify under Site configuration, Environment variables; locally in the gitignored `.env`. The `VITE_` prefix is the line between public and private, enforced by Vite at build time. The two newer functions add **no new secrets**: `device-history` reuses the read-only `LOSANT_API_TOKEN`, and `render-pdf` reuses the Supabase pair to authenticate the caller and needs no Losant access at all.
+
+## 7.4 device-history.js, the history path
+
+Backs the report graphs. The app only holds a 60-reading in-memory ring, so anything longer than the last few minutes comes from Losant's time-series store. `GET ?deviceId&start&end` (ms epoch) issues a `POST /data/time-series-query` with the read-only token:
+
+```js
+const MAX_POINTS = 240, MINUTE = 60000;
+const resolution = Math.max(MINUTE, Math.ceil((end - start) / MAX_POINTS / MINUTE) * MINUTE);
+// body: { start, end, resolution, aggregation:'MEAN',
+//         attributes:[air/soil...], deviceIds:[deviceId], order:'asc' }
+```
+
+The resolution auto-scales so a report never carries more than ~240 chart points regardless of span (a year collapses into ~1.5-day buckets; a day stays at minute detail). The same disconnected-sensor sentinels handled everywhere else are cleaned to `null` here too (soil temp < -100, humidity <= 0, the DHT22 "temp 0 with no humidity" case, soil raw < 300), so a dead probe leaves an honest gap in the graph instead of dragging the averages. Empty lead/tail buckets (an "Everything" range that starts before the unit existed) are trimmed; interior gaps are kept so offline stretches stay visible.
+
+## 7.5 render-pdf.js, the server-side report renderer
+
+Produces a true vector PDF, crisp selectable text, from a finished report's HTML using headless Chrome. `POST { html, filename }`:
+
+```js
+import chromium from '@sparticuz/chromium';   // Lambda-sized Chromium binary
+import puppeteer from 'puppeteer-core';
+// 1) auth-gate: verify the caller's Supabase token (GET /auth/v1/user) -> 401 if invalid
+// 2) launch chromium, page.setContent(html, {waitUntil:'networkidle0'})
+// 3) page.pdf({ format:'letter', printBackground:true, margin:{...} })
+// 4) return base64 PDF with Content-Disposition: attachment
+```
+
+It is **auth-gated** (a valid session is required) so it can't be abused as an open HTML-to-PDF service; it does not trust the HTML to name a device, it only confirms the caller is a signed-in user. `netlify.toml` keeps the native binary out of the esbuild bundle and ships it alongside the function:
+
+```toml
+[functions."render-pdf"]
+  external_node_modules = ["@sparticuz/chromium", "puppeteer-core"]
+  included_files = ["node_modules/@sparticuz/chromium/**"]
+```
+
+This is the **preferred** download path. The client tries it first and falls back to in-browser rendering (see §9.10) if the caller isn't signed in (demo mode), the function is slow/unavailable, or it returns anything but a PDF, so the download always succeeds.
 
 ---
 
@@ -641,24 +727,28 @@ One context provides everything; there is no Redux because one provider with `us
 
 ```
 { id, name, location, geo {lat, lon, label}, group, transport: 'wifi'|'lorawan',
-  plant, irrigation {mode, targetMoisture, durationSec, enabled, pausedUntil},
+  plant, irrigation {mode, targetMoisture, durationSec, enabled, pausedUntil, rainDelay},
   losantDeviceId?,           // present = a real claimed unit
+  claimedAt,                 // ms epoch; when the plant joined the account
   reading, history[<=60], hasData, online, lastSeen, pumpRunning }
 ```
 
 `buildDevice` normalizes any persisted shape: legacy `ethernet` transports coerce to `wifi`, defaults fill missing fields, and, critically, **claimed devices initialize with a null reading, `hasData:false`, `online:false`**. They render as "Waiting for the first reading" with dashes. Only the arrival of real cloud data flips them live. Demo devices initialize from `seedReading()` instead. This split exists because an early bug let fake-looking data appear for devices that had never reported.
 
-**The live loop.** One `setInterval` at the user's refresh rate. Each tick: claimed devices are fetched in parallel from `device-state` (errors keep the previous reading; a `devicesRef` lets the closure read current state without re-arming the interval), and demo devices advance via `nextReading`, a bounded random walk. Updates append to a 60-entry rolling history that powers trends and the metric detail charts.
+**Cloud-authoritative devices.** For real accounts, devices are not seeded from localStorage; the store initializes to `[]` and a `devicesReady` flag gates the UI while it loads `supabase.from('devices').select('*').order('created_at')`. `rowToDevice(r)` maps a table row into the device shape (`r.grp -> group`, `r.created_at -> claimedAt`, the row `id` as the device id). `syncDevice(id, patch)` pushes changed fields back (name, location, geo, grp, transport, plant, irrigation). Demo mode is the only path that still persists to localStorage. The one-time legacy-claim migration described in §6.3 runs here.
 
-**Weather, pinned to the plant.** The selected device's stored `geo` drives an Open-Meteo forecast call (current temperature and weather code, daily rain probability, UV, high; unit-aware). Only when the device has no geo does the app fall back to browser geolocation, then to a default. The effect re-runs when units or the pinned coordinates change. This is the answer to the vacation problem: the forecast describes where the plant lives, not where the owner is standing.
+**The live loop.** One `setInterval` at the user's refresh rate. Each tick: claimed devices are fetched in parallel from `device-state` (errors keep the previous reading; a `devicesRef` lets the closure read current state without re-arming the interval), and demo devices advance via `nextReading`, a bounded random walk. Updates append to a 60-entry rolling history that powers trends and the metric detail charts. Staleness flips `online:false` after 45 s of silence on Wi-Fi (15 min on LoRaWAN, which reports far less often by design).
+
+**Weather, pinned to the plant, location optional.** The selected device's stored `geo` drives an Open-Meteo forecast call (current temperature and weather code, daily rain probability, UV, high; unit-aware). If the device has **no** `geo`, the store sets `weather = { needsLocation: true }` and stops, it never reads browser/GPS location and never invents a default city. The card then invites the user to add a location. This is deliberate: customers who don't want to share where they live are not forced to, and the only feature that actually needs a location (rain delay) is the one that asks for it, with the reason shown. The effect re-runs when units or the pinned coordinates change. It is still the answer to the vacation problem: the forecast describes where the plant lives, not where the owner is standing.
 
 **Actions, each one line of intent:**
 
 - `addDevice` (demo only): adds a simulated device.
-- `claimDevice(code, name, place, transport)`: registry validation, geocode, add. Returns an error string or null, which the claim sheet renders.
-- `setDevicePlant`, `updateDevice` (general patch: rename, location with re-geocode handled by the edit sheet, group, transport).
-- `removeDevice(id)`: removes the device **and purges** its journal entries and any device-scoped alarm rules. A resold or deleted unit leaves nothing behind.
-- `factoryResetDevice(id)`: best-effort POST of the `factoryReset` command, then `removeDevice`. The confirmation dialog carries the data-loss disclaimer and the offline PRG fallback.
+- `claimDevice(code, name, place, transport)`: registry validation, optional geocode, then for real accounts an `insert` into the `devices` table (a `23505` unique-violation becomes "already claimed by another account"); demo adds locally. Returns an error string or null, which the claim sheet renders.
+- `setDevicePlant`, `updateDevice` (general patch: rename, location with re-geocode, geo, group, transport, all mirrored to the cloud via `syncDevice`).
+- `setIrrigation(id, patch)`: merges the watering config (including `rainDelay`) and syncs the whole `irrigation` object to the row.
+- `removeDevice(id)`: removes the device, **purges** its journal entries and device-scoped alarm rules, and `delete`s the cloud row (releasing the claim so the unit can be re-claimed). A resold or deleted unit leaves nothing behind.
+- `factoryResetDevice(id)`: attaches the caller's session token, POSTs the ownership-checked `factoryReset` command (§7.2), then `removeDevice`. The confirmation dialog carries the data-loss disclaimer and the offline PRG fallback.
 - `setIrrigation`, `runPump`: watering state and the simulated pump run (real pump control becomes a Losant command at the backend phase).
 - Journal: `addJournalEntry`/`removeJournalEntry`, keyed by device id, entries `{id, date, photo, note}` with photos as downscaled data URLs.
 - Gateways: `addGateway`/`removeGateway`, the Farm Kit bookkeeping list.
@@ -676,14 +766,14 @@ The provider also derives the display identity: prefer `user_metadata.first_name
 - `healthScore`: good=100, warn=66, critical=28, averaged over **connected** metrics only, so a missing probe neither drags down nor props up the score. The weights make a single critical metric visibly hurt (one critical among four healthy reads 82, not 95).
 - `recommendations`: ordered advice. Missing-sensor fix-its first (each names the exact pin and component to check), then battery warnings (warn at 20 percent, critical at 10, suppressed while charging or on AC), then plant-care advice derived from the bands, then the all-good line only if nothing else fired.
 - `powerInfo`: null `batteryPct` means AC (true for today's USB units); otherwise battery percent plus charging flag.
-- Mock generators: `seedReading` and `nextReading` (bounded random walk; soil simulated in raw counts and converted exactly like the firmware does, same DRY/WET constants). `buildSeries` synthesizes hour/day/week/month chart data centered on the plant's ideal band, demo-grade history until long-range queries hit the cloud store (Roadmap).
+- Mock generators: `seedReading` and `nextReading` (bounded random walk; soil simulated in raw counts and converted exactly like the firmware does, same DRY/WET constants). `buildSeries` synthesizes hour/day/week/month chart data centered on the plant's ideal band for the in-app metric-detail sheets and the demo report; real reports now pull genuine long-range history from the cloud via `device-history` (§7.4).
 - `activeAlerts(devices, rules, weather)`: evaluates enabled rules per device (or once against the forecast for `rainChance` rules) and returns the tripped set used by the banner, badge, and toasts. `alarmsFromPlant` generates the one-tap starter rules from the plant's good band.
 - Display helpers: `convertTemp`/`displayValue`/`displayUnit` (F-to-C at the display layer only, storage stays Fahrenheit so units switching never mutates data), `trendOf` (last two history points: up, down, flat).
 - `TRANSPORTS`: Wi-Fi and LoRaWAN. Ethernet was removed because current hardware has no port; honest options only.
 
 ## 9.7 store/tiers.js
 
-Free ($0: 3 devices, core monitoring), Plus ($4.99/mo: 10 devices, weather rain gauge), Pro ($9.99/mo: unlimited, automated irrigation, LoRaWAN positioning). Tiers are feature flags consumed across the app (`tier.weather`, `tier.irrigation`, `tier.deviceLimit`); demo mode runs on pro so prospects see everything; real accounts default to free with polished locked-state upgrade cards.
+Free ($0: 3 devices, core monitoring), Plus ($4.99/mo: 10 devices, weather rain gauge), Pro ($9.99/mo: unlimited, automated irrigation incl. rain delay, LoRaWAN positioning). Tiers are feature flags consumed across the app (`tier.weather`, `tier.irrigation`, `tier.deviceLimit`); demo mode runs on pro so prospects see everything; real accounts default to free with polished locked-state upgrade cards. Rain delay lives inside `tier.irrigation` (Pro) and is additionally gated at runtime on the node having a location, since it depends on the forecast.
 
 ## 9.8 Components
 
@@ -693,10 +783,12 @@ Free ($0: 3 devices, core monitoring), Plus ($4.99/mo: 10 devices, weather rain 
 - **ClaimDeviceSheet.jsx**: the pairing flow described in chapter 8, including the Wi-Fi vs gateway chips whose helper text teaches the cadence trade-off (seconds vs minutes, battery life).
 - **AddDeviceSheet.jsx**: demo-only simulated device creation.
 - **GatewaySheet** (in DevicesView): name plus label code, with plug-into-router guidance.
-- **WeatherCard.jsx**: maps Open-Meteo WMO weather codes to label/icon/color (`describe()`), shows temperature, condition, location with a "plant's home" tag when pinned, rain chance and high, plus contextual notes: a rain note suggesting skipped watering at 50 percent or more, a sun/heat note at high UV or heat.
+- **WeatherCard.jsx**: maps Open-Meteo WMO weather codes to label/icon/color (`describe()`), shows temperature, condition, location, rain chance and high, plus contextual notes: a rain note suggesting skipped watering at 50 percent or more, a sun/heat note at high UV or heat. When `weather.needsLocation` it renders an "add this plant's location" prompt with an inline `SetLocationInline` instead, no fake city, no GPS request.
+- **SetLocationInline.jsx**: a small self-contained control (city/ZIP input + button) that geocodes via `geocodePlace` and pins the result to the device with `updateDevice`. Reused by the weather card and the rain-delay gate so the customer can add a location without leaving what they're doing; an `onDone` callback lets the rain-delay gate immediately enable the feature once a location is saved.
 - **Chart.jsx**: the recharts area chart, gradient fill, ideal-band `ReferenceArea`, max and average reference lines, animation off for live data.
 - **GrowthJournal.jsx**: photo strip plus timeline sheet; photos are downscaled to thumbnails client-side (`fileToThumb`) before storage so localStorage stays manageable; capture attribute opens the camera on phones.
-- **IrrigationCard.jsx**: manual/auto/schedule modes, target-moisture slider, pump duration stepper, Water now (simulated pump bumps moisture), and the rain-pause banner with resume.
+- **IrrigationCard.jsx**: manual/auto/schedule modes, target-moisture slider, pump duration stepper, Water now (simulated pump bumps moisture), the rain-pause banner with resume, and the **rain delay** card. Rain delay (skip auto-watering when rain is forecast) is gated on the node having a `geo`: the toggle is disabled without one and a warnbox explains that the feature needs *this specific plant's* home location for the forecast, with an inline `SetLocationInline` (`onDone` enables rain delay the moment a location is saved). The auto-mode "skips when rain is forecast" line only appears when rain delay is actually on.
+- **ExportSheet.jsx**: the report options sheet (period presets / custom from-to / "Everything", per-plant checkboxes when >1 device, per-sensor checkboxes). On generate it fetches each chosen plant's history (`device-history` for real units; a local mock series for demo plants) and calls `downloadAccountPdf` or `openAccountExport`. While working it swaps the form for a spinner + phase label ("Gathering your sensor data…" -> "Rendering your PDF…") and blocks close/backdrop so the in-flight render can't be orphaned or double-fired.
 - **PlansSheet.jsx**: pricing cards from `TIERS`; in demo, buying sets the tier instantly and shows a thank-you (real billing is a roadmap item and the sheet says so).
 - **PlantPicker.jsx**: search across name, scientific name, and category; results grouped by category; each row previews its ideal moisture band; picking re-ranges the whole app via `rangesForDevice`.
 
@@ -706,12 +798,16 @@ Free ($0: 3 devices, core monitoring), Plus ($4.99/mo: 10 devices, weather rain 
 - **HistoryView**: per-metric cards for HOUR/DAY/WEEK/MONTH with max/avg/min and the ideal band, unit-aware.
 - **AlarmsView**: live alert banner and cards, the auto-set button (plant-derived starter rules), and rule cards with enable toggle, device scope dropdown, above/below pills, and a threshold slider bounded by the metric's min/max.
 - **DevicesView**: grouped device cards (group headings plus "Other plants"; flat when no groups exist), the gateways section, both add flows, and the edit sheet: name, home location (re-geocoded on save), group (with datalist suggestions from existing groups), connection type with the honest switching note, and the danger zone, Remove and Factory reset, each behind a confirmation screen with explicit data-loss language.
-- **SettingsView**: plan card, units, theme, the LoRaWAN-aware refresh-rate pills with the battery-drain note, notification channels (push/email/SMS with addresses), and the account card with name, grower badge, and sign-out.
+- **SettingsView**: plan card, units, theme, the LoRaWAN-aware refresh-rate pills with the battery-drain note, notification channels (push/email/SMS with addresses), and the account card with name, grower badge, **Download report (PDF)** (opens `ExportSheet`), and sign-out. The old machine-readable JSON export link was removed, the branded report is the one export customers actually want.
 
 ## 9.10 Utilities
 
 - **geocode.js**: Open-Meteo's free geocoder; returns `{lat, lon, label}` or null; the label ("Davie, Florida") doubles as the device's display location.
-- **report.js**: the shareable plant report. Builds a fully self-contained branded HTML document (header, plant identity line with power state and owner, health stat, a sensor table of current values plus min/avg/max computed from in-memory history with sentinels filtered, weather at the plant's home, journal entries with inline data-URL photos), opens it in a new window, and calls `window.print()`. The print dialog supplies Save-as-PDF, paper, and sharing for free, zero client dependencies and perfect fidelity, which is why no PDF library ships in the bundle.
+- **report.js**: the original single-plant snapshot report (header, plant identity, health stat, a sensor table of current values plus min/avg/max from in-memory history, weather, journal photos), opened in a new window for `window.print()`. Still used for the quick per-plant share.
+- **accountExport.js**: the full account/plant **report** system, the bulk of the recent work. `buildReport()` assembles one branded HTML document from the selected plants and their fetched histories: a letterhead and account/period block, then per-plant **inline-SVG line charts** (one per selected sensor, ideal-band shading, min/avg/max, segmented at nulls so offline gaps and disconnected sensors show honestly), a chronological **activity timeline** (claimed date, first data, journal entries), and the device/gateway/alarm/preferences/journal summary tables. All chart CSS is scoped under `.gp-doc` / `.gpr-*` so the document can be rendered inside the live app page (for client-side PDF) without restyling the app, a real bug we hit when the report's `.brand` collided with the app's. Three delivery paths share that one document:
+  - `openAccountExport()` writes a standalone HTML doc to a new tab and auto-prints (sharpest text, paper-friendly).
+  - `downloadAccountPdf()` is the one-tap download: it **tries the server renderer first** (`render-pdf`, true vector PDF, §7.5), and on any failure or in demo mode **falls back** to `clientPdf()`.
+  - `clientPdf()` renders the report off-screen and rasterizes it with `html2pdf.js` (dynamically imported so it never weighs down normal app loads; PNG encoding and a 2–3x scale clamped to stay inside mobile-Safari's canvas limit). Slightly softer than the server's vector output but always available offline.
 
 ## 9.11 The design system (index.css)
 
@@ -731,15 +827,15 @@ How the layers cooperate for each major operation, useful as integration documen
 
 **First boot and provisioning.** Power on, OLED "Starting up", boot-time PRG check, banner with pairing code, sensors begin, `connectWiFi()` finds no saved credentials, AP callback flips the OLED to join instructions, customer joins the hotspot, portal serves the branded config page (or 192.168.4.1 manually), credentials saved, association succeeds, OLED shows the pair code with "..", `connectLosant()` brings up MQTT, OLED flips to "ON", telemetry begins on the 3-second cadence.
 
-**Claim.** App: Connect a device, transport choice, name, home place, code. Store: registry SELECT by code (RLS-permitted read), reject or accept, geocode place, add device with `losantDeviceId` and `geo`, select it. UI shows DeviceWaiting until the first poll returns data, then the dashboard goes live.
+**Claim.** App: Connect a device, transport choice, name, optional location, code. Store: registry SELECT by code (RLS-permitted read), reject if unknown; for a real account `insert` a `devices` row (unique `claim_code` enforces single ownership, a `23505` is surfaced as "already claimed"); geocode the place if given; add the device with `losantDeviceId`/`geo`/`claimedAt` and select it. UI shows DeviceWaiting until the first poll returns data, then the dashboard goes live.
 
 **Live tick.** Interval fires, claimed devices fetch `device-state` in parallel, nulls and sentinels flow through untouched, readings append to history, trends/health/insights recompute, `metricConnected` decides which slots render as data versus "not connected."
 
 **Alarm trip.** A reading crosses a rule threshold. In-app: `activeAlerts` includes it, the Alarms tab badge and banner update, the Shell's key-diff raises a toast. Out-of-app: the Losant workflow's conditional passes and the email/SMS node fires (subject to the one-per-minute email rate limit). Two independent layers, by design.
 
-**Factory reset.** Edit device, danger zone, Factory reset, confirmation with the disclaimer, `factoryResetDevice`: POST device-command (allowlisted, write token), Losant delivers `factoryReset` over MQTT, firmware shows "Reset by owner", wipes Wi-Fi, reboots into the setup hotspot; meanwhile the app removes the device and purges journal and device-scoped alarms. Offline unit: command is lost, PRG hold covers it, dialog says so.
+**Factory reset.** Edit device, danger zone, Factory reset, confirmation with the disclaimer, `factoryResetDevice`: attach the caller's Supabase session, POST device-command (POST + allowlist + write token + **ownership check** against the `devices` table), Losant delivers `factoryReset` over MQTT, firmware shows "Reset by owner", wipes Wi-Fi, reboots into the setup hotspot; meanwhile the app removes the device, deletes its cloud row (releasing the claim), and purges journal and device-scoped alarms. Offline unit: command is lost, PRG hold covers it, dialog says so.
 
-**Report.** App bar document icon, `openPlantReport` assembles the branded HTML from current state, history stats, weather, and journal, opens a tab, `window.print()`, user saves as PDF or prints.
+**Report export.** Settings -> Download report -> `ExportSheet`: pick period / plants / sensors. On generate, fetch each plant's history (`device-history` per real unit, in parallel; mock series for demo), build the report via `accountExport.buildReport`. **Download PDF**: `downloadAccountPdf` POSTs the HTML to `render-pdf` (auth-checked headless-Chrome vector PDF) and saves the returned blob; on any failure or demo mode it falls back to `clientPdf` (html2pdf raster). **Print report**: `openAccountExport` opens the standalone HTML and auto-prints. A spinner with phase labels covers the wait and the sheet is close-locked until done.
 
 ---
 
@@ -785,6 +881,14 @@ Every failure below was actually encountered during development. Symptoms are ex
 | Sentinels pass through the pipeline untouched | The app converts them to honest "not connected" UI with fix-it hints; hiding them would mask hardware faults |
 | Claimed devices start with no data | Never display invented numbers; trust is the product |
 | Weather pinned to a per-device geocoded home | The forecast must follow the plant, not the traveling owner |
+| Location is optional; never read browser/GPS; no default city | Customers who won't share location aren't blocked; we don't fabricate a place we can't justify |
+| Rain delay is the only location-gated feature, and it asks at point of use | The one feature that genuinely needs a forecast is where we request the location, with the reason shown, and it names the node that still lacks one |
+| Full report = cloud history + inline-SVG graphs + timeline, replacing JSON export | A branded report with graphs is what customers actually use; raw JSON was noise for ~99% of them |
+| Report CSS scoped under `.gp-doc`/`.gpr-*` | The client-side renderer mounts the report inside the live app; unscoped class names collided with the app (centered logo bug) |
+| Server-side PDF (headless Chrome) with a client raster fallback | Vector text is sharpest; the fallback guarantees the download always works (offline, demo, cold function) |
+| `render-pdf` is auth-gated | Prevents abuse as an open HTML-to-PDF service while needing no Losant access |
+| Cloud-authoritative ownership via a `devices` table with per-user RLS | Claims follow the account across browsers, enforce one owner per unit, and give `device-command` something to authorize against |
+| History resolution auto-scaled to <=240 points | Reports stay readable and responses stay small whether the span is a day or a year |
 | Health score excludes disconnected sensors; weights 100/66/28 | A missing probe must not bias the score; one critical metric must visibly hurt |
 | Two Losant API tokens (read-only and command) | Least privilege on the hot read path |
 | All cloud tokens live in serverless functions | No credential ever ships in a browser bundle; `VITE_` prefix is the boundary |
@@ -804,14 +908,16 @@ Every failure below was actually encountered during development. Symptoms are ex
 # 13. Known Limitations and Roadmap
 
 1. **Per-unit cloud provisioning.** All flashed units currently share the demo unit's cloud identity. Production requires a flash-time provisioning station: generate per-unit Losant credentials, write them to the unit, create the cloud device, insert the registry row, print packaging.
-2. **Server-side device ownership.** Claims live in per-account browser storage. A `devices(user_id, losant_device_id, claim_code)` table with RLS makes ownership cloud-authoritative, syncs across browsers, enforces claim exclusivity, and lets `device-command` verify the caller owns the target before sending.
+2. **~~Server-side device ownership.~~ DONE (§6.3, §7.2).** The `devices` table with per-user RLS is live: ownership is cloud-authoritative, syncs across browsers, enforces claim exclusivity, and `device-command` now verifies the caller owns the target before sending.
 3. **Zero-typing auto-bind.** The portal carries a one-time account token; the unit POSTs it to a bind endpoint on first connect. Claim codes are the shipping-grade interim.
 4. **LoRaWAN bring-up.** The SX1262 is on every board and a 915 MHz gateway (ThinkNode G1) is in hand: LoRaWAN firmware variant, a network server (The Things Stack or ChirpStack), webhook into the existing pipeline, transport switching via cloud command, and the app's gateway section binding to real gateway status.
 5. **Battery telemetry.** GPIO1 sense plus `batteryPct`/`charging` in the JSON; every consumer of those fields already exists.
-6. **Durable history.** Charts draw from the 60-reading in-memory ring; long-range views should query Losant's time-series store through a new function.
+6. **~~Durable history.~~ DONE (§7.4).** Reports now query Losant's time-series store through `device-history` for full-period graphs; the 60-reading in-memory ring remains only for the live trend/detail sheets.
 7. **Web push notifications** for alarm trips, complementing cloud email/SMS.
 8. **Billing.** Tiers are functional feature gates; Stripe integration replaces the demo "buy" path.
-9. **Family sharing.** Multiple accounts per garden, after item 2.
+9. **Family sharing.** Multiple accounts per garden, now unblocked by item 2.
+10. **Rain-delay actuation.** The rain-delay flag, location gating, and pause UX are in; wiring it to actually suppress real pump commands lands with the irrigation backend.
+11. **Group-level report select.** Reports pick per node; a "whole group" shortcut is the next convenience once accounts run many nodes per zone.
 
 ---
 
@@ -843,6 +949,11 @@ Every failure below was actually encountered during development. Symptoms are ex
 | `docs/GrowthPulse Engineering Manual.(md/pdf)` | This document |
 | `docs/GrowthPulse Wiring Guide.md`, `docs/GrowthPulse Wiring Diagram.pdf` | Bench wiring references |
 | `docs/growthpulse-supabase-schema.sql` | Registry schema |
+| `docs/growthpulse-devices-schema.sql` | Ownership `devices` table + RLS policies |
+| `netlify/functions/device-history.js` | Time-series history for report graphs |
+| `netlify/functions/render-pdf.js` | Headless-Chrome vector PDF renderer |
+| `src/utils/accountExport.js` | Full report builder + three delivery paths |
+| `src/components/ExportSheet.jsx`, `src/components/SetLocationInline.jsx` | Report options sheet; inline location setter |
 | `docs/GrowthPulse Product Roadmap.md`, `docs/GrowthPulse Deployment Model.md` | Product strategy docs |
 | `README.md` (repo) | Developer onboarding |
 

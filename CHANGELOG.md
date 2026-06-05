@@ -6,6 +6,15 @@ All notable changes to GrowthPulse, the web app and the device firmware.
 
 ## Web App
 
+### v2.10.0 — June 5, 2026
+- Location is now fully optional. The app never asks for your device/GPS location and never shows a fake default city. A plant's location is only used by weather features, and you add it yourself (city or ZIP) when you want them.
+- New **Rain delay** (Pro): skip automatic watering when rain is in the local forecast. Because it needs the forecast where the plant lives, turning it on asks for that plant's location and explains why; the switch names the node that still needs one.
+- Weather card invites you to add a location instead of guessing one.
+- Manuals: User + Engineering manuals updated for everything since the last revision (full report export, server-side PDF, cloud device ownership, location/rain delay).
+
+### v2.9.2 — June 5, 2026
+- The app no longer asks for your device location. Weather follows each plant's own home location; plants without one show a clearly-marked default city until you set it.
+
 ### v2.9.1 — June 5, 2026
 - Report download now shows a clear loading screen with a spinner and step ("Gathering data…", "Rendering your PDF…") so it's obvious the work is in progress. The sheet won't close mid-render and the buttons can't be double-fired.
 
