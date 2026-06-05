@@ -23,6 +23,30 @@ export const handler = async (event) => {
     return { statusCode: 400, body: JSON.stringify({ error: 'Unsupported command' }) };
   }
 
+  // Ownership check: the caller's Supabase session is forwarded to the
+  // devices table, where row-level security only returns rows the caller
+  // owns. No row = not your device = no command.
+  const supaUrl = process.env.VITE_SUPABASE_URL;
+  const supaKey = process.env.VITE_SUPABASE_ANON_KEY;
+  if (supaUrl && supaKey) {
+    const callerAuth = event.headers.authorization || event.headers.Authorization;
+    if (!callerAuth) {
+      return { statusCode: 401, body: JSON.stringify({ error: 'Sign in required' }) };
+    }
+    try {
+      const own = await fetch(
+        `${supaUrl}/rest/v1/devices?losant_device_id=eq.${encodeURIComponent(deviceId)}&select=id`,
+        { headers: { apikey: supaKey, Authorization: callerAuth } }
+      );
+      const rows = own.ok ? await own.json() : [];
+      if (!Array.isArray(rows) || rows.length === 0) {
+        return { statusCode: 403, body: JSON.stringify({ error: 'You do not own this device' }) };
+      }
+    } catch {
+      return { statusCode: 502, body: JSON.stringify({ error: 'Ownership check failed' }) };
+    }
+  }
+
   try {
     const res = await fetch(
       `https://api.losant.com/applications/${appId}/devices/${encodeURIComponent(deviceId)}/command`,

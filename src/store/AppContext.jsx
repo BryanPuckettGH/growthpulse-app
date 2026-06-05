@@ -70,16 +70,33 @@ const DEFAULT_ALARMS = [
   { id: 'a3', metric: 'airHumidity', op: 'below', value: 30, enabled: false, deviceId: 'all' },
 ];
 
+// Map a Supabase devices row into the app's device shape.
+function rowToDevice(r) {
+  return buildDevice({
+    id: r.id,
+    name: r.name,
+    location: r.location || '',
+    geo: r.geo || undefined,
+    group: r.grp || undefined,
+    transport: r.transport,
+    plant: r.plant,
+    irrigation: r.irrigation || undefined,
+    losantDeviceId: r.losant_device_id,
+  });
+}
+
 export function AppProvider({ children }) {
   const { user, logout, isDemo } = useAuth();
   STORAGE_PREFIX = user.id; // each account's data is namespaced by user id
   const [devices, setDevices] = useState(() => {
+    // Real accounts are cloud-authoritative: devices load from Supabase in the
+    // effect below so plants follow the account onto any browser.
+    if (!isDemo) return [];
     const saved = load('devices', null);
-    // Real accounts start empty (onboarding prompts to connect a device).
-    // Demo mode seeds sample devices so prospects can explore everything.
-    const base = saved && saved.length ? saved : (isDemo ? STARTER_DEVICES : []);
+    const base = saved && saved.length ? saved : STARTER_DEVICES;
     return base.map(buildDevice);
   });
+  const [devicesReady, setDevicesReady] = useState(isDemo);
   const [selectedDeviceId, setSelectedDeviceId] = useState(() => load('selectedDeviceId', null));
   const [alarmRules, setAlarmRules] = useState(() => load('alarmRules', DEFAULT_ALARMS));
   const [settings, setSettings] = useState(() => load('settings', { units: 'F', refreshMs: 2000, theme: 'auto' }));
@@ -92,6 +109,75 @@ export function AppProvider({ children }) {
   // Live ref so the polling loop always sees the latest device list.
   const devicesRef = useRef(devices);
   devicesRef.current = devices;
+
+  // Load this account's devices from the cloud. Also a one-time migration:
+  // claims made before cloud ownership existed are lifted out of this
+  // browser's storage into the account, keeping journals and alarms attached.
+  useEffect(() => {
+    if (isDemo || !supabase) { setDevicesReady(true); return undefined; }
+    let cancelled = false;
+    (async () => {
+      const { data: rows, error } = await supabase.from('devices').select('*').order('created_at');
+      if (cancelled) return;
+      if (error) { setDevicesReady(true); return; } // can't reach the cloud; app still opens
+      let list = (rows || []).map(rowToDevice);
+
+      if (list.length === 0) {
+        const saved = (load('devices', []) || []).filter((d) => d.losantDeviceId);
+        for (const d of saved) {
+          // Recover the unit's claim code from the registry (older local
+          // claims stored only the cloud device id).
+          const { data: reg } = await supabase
+            .from('device_registry').select('claim_code')
+            .eq('losant_device_id', d.losantDeviceId).maybeSingle();
+          const { data: ins } = await supabase.from('devices').insert({
+            claim_code: reg ? reg.claim_code : String(d.losantDeviceId).toUpperCase(),
+            losant_device_id: d.losantDeviceId,
+            name: d.name || 'My Plant',
+            location: d.location || '',
+            geo: d.geo || null,
+            grp: d.group || null,
+            transport: d.transport === 'lorawan' ? 'lorawan' : 'wifi',
+            plant: d.plant || 'generic',
+            irrigation: d.irrigation || null,
+          }).select().single();
+          if (ins) {
+            list.push(rowToDevice(ins));
+            const oldId = d.id;
+            // Keep this browser's journals/alarms attached to the new cloud id.
+            setJournals((j) => {
+              if (!j[oldId]) return j;
+              const next = { ...j, [ins.id]: j[oldId] };
+              delete next[oldId];
+              return next;
+            });
+            setAlarmRules((rs) => rs.map((r) => (r.deviceId === oldId ? { ...r, deviceId: ins.id } : r)));
+            setSelectedDeviceId((sel) => (sel === oldId ? ins.id : sel));
+          }
+        }
+      }
+      if (cancelled) return;
+      setDevices(list);
+      setDevicesReady(true);
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDemo]);
+
+  // Push device edits up to the cloud (real accounts only).
+  const syncDevice = useCallback((id, patch) => {
+    if (isDemo || !supabase) return;
+    const map = {};
+    if ('name' in patch) map.name = patch.name;
+    if ('location' in patch) map.location = patch.location;
+    if ('geo' in patch) map.geo = patch.geo ?? null;
+    if ('group' in patch) map.grp = patch.group ?? null;
+    if ('transport' in patch) map.transport = patch.transport;
+    if ('plant' in patch) map.plant = patch.plant;
+    if ('irrigation' in patch) map.irrigation = patch.irrigation;
+    if (Object.keys(map).length === 0) return;
+    supabase.from('devices').update(map).eq('id', id).then(() => {});
+  }, [isDemo]);
 
   // Live loop: claimed devices (with a losantDeviceId) pull REAL readings from
   // the cloud connector; demo/sample devices advance simulated readings.
@@ -194,8 +280,10 @@ export function AppProvider({ children }) {
     }
     return () => { cancelled = true; };
   }, [settings.units, pinnedGeo && pinnedGeo.lat, pinnedGeo && pinnedGeo.lon]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Demo devices persist in the browser; real accounts persist in the cloud.
   const deviceSig = devices.map((d) => `${d.id}|${d.name}|${d.location}|${d.transport}|${d.plant}|${JSON.stringify(d.irrigation)}|${d.losantDeviceId || ''}|${d.geo ? d.geo.lat + ',' + d.geo.lon : ''}|${d.group || ''}`).join(',');
   useEffect(() => {
+    if (!isDemo) return;
     save('devices', devices.map((d) => ({ id: d.id, name: d.name, location: d.location, transport: d.transport, plant: d.plant, irrigation: d.irrigation, losantDeviceId: d.losantDeviceId, geo: d.geo, group: d.group })));
   }, [deviceSig]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -220,27 +308,35 @@ export function AppProvider({ children }) {
     // Pin the plant to its real home so weather stays correct even when the
     // owner is traveling. Geocode failure is non-fatal; weather falls back.
     const geo = place && place.trim() ? await geocodePlace(place.trim()) : null;
-    const id = 'node-' + Math.random().toString(36).slice(2, 6);
-    setDevices((ds) => [...ds, buildDevice({
-      id,
+    // The claim lives in the account, not this browser. claim_code is UNIQUE,
+    // so a unit can only ever belong to one account at a time.
+    const { data: ins, error: insErr } = await supabase.from('devices').insert({
+      claim_code: claimCode,
+      losant_device_id: data.losant_device_id,
       name: name || 'My Plant',
       location: geo ? geo.label : (place || '').trim(),
+      geo: geo || null,
       transport: transport === 'lorawan' ? 'lorawan' : 'wifi',
       plant: 'generic',
-      losantDeviceId: data.losant_device_id,
-      geo: geo || undefined,
-    })]);
-    setSelectedDeviceId(id);
+    }).select().single();
+    if (insErr) {
+      if (insErr.code === '23505') return 'That unit is already claimed by another account. Its owner can release it under Edit device.';
+      return 'Could not save the device. Check your connection and try again.';
+    }
+    setDevices((ds) => [...ds, rowToDevice(ins)]);
+    setSelectedDeviceId(ins.id);
     return null;
   }, []);
 
   const setDevicePlant = useCallback((id, plant) => {
     setDevices((ds) => ds.map((d) => (d.id === id ? { ...d, plant } : d)));
-  }, []);
+    syncDevice(id, { plant });
+  }, [syncDevice]);
 
   const updateDevice = useCallback((id, patch) => {
     setDevices((ds) => ds.map((d) => (d.id === id ? { ...d, ...patch } : d)));
-  }, []);
+    syncDevice(id, patch);
+  }, [syncDevice]);
   // Removing a device also purges everything tied to it (journal, photos,
   // device-specific alarms) so a resold unit leaves nothing behind.
   const removeDevice = useCallback((id) => {
@@ -251,7 +347,9 @@ export function AppProvider({ children }) {
       return next;
     });
     setAlarmRules((rs) => rs.filter((r) => r.deviceId !== id));
-  }, []);
+    // Releasing the claim in the cloud frees the unit for a new owner.
+    if (!isDemo && supabase) supabase.from('devices').delete().eq('id', id).then(() => {});
+  }, [isDemo]);
 
   // Factory reset for resale: tell the unit (via the cloud) to wipe its own
   // Wi-Fi and reboot into setup mode, then remove it from this account.
@@ -261,7 +359,14 @@ export function AppProvider({ children }) {
     const d = devicesRef.current.find((x) => x.id === id);
     if (d && d.losantDeviceId) {
       try {
-        await fetch(`/.netlify/functions/device-command?deviceId=${encodeURIComponent(d.losantDeviceId)}&name=factoryReset`, { method: 'POST' });
+        // The signed-in session rides along so the backend can verify this
+        // account actually owns the unit before sending the command.
+        let headers = {};
+        if (supabase) {
+          const { data: sess } = await supabase.auth.getSession();
+          if (sess && sess.session) headers = { Authorization: `Bearer ${sess.session.access_token}` };
+        }
+        await fetch(`/.netlify/functions/device-command?deviceId=${encodeURIComponent(d.losantDeviceId)}&name=factoryReset`, { method: 'POST', headers });
       } catch {
         // unreachable; manual PRG fallback still works
       }
@@ -270,8 +375,13 @@ export function AppProvider({ children }) {
   }, [removeDevice]);
 
   const setIrrigation = useCallback((id, patch) => {
-    setDevices((ds) => ds.map((d) => (d.id === id ? { ...d, irrigation: { ...d.irrigation, ...patch } } : d)));
-  }, []);
+    setDevices((ds) => ds.map((d) => {
+      if (d.id !== id) return d;
+      const irrigation = { ...d.irrigation, ...patch };
+      syncDevice(id, { irrigation });
+      return { ...d, irrigation };
+    }));
+  }, [syncDevice]);
   const runPump = useCallback((id, seconds = 5) => {
     setDevices((ds) => ds.map((d) => (d.id === id ? { ...d, pumpRunning: true } : d)));
     setTimeout(() => {
@@ -333,7 +443,7 @@ export function AppProvider({ children }) {
 
   const value = {
     user: { id: user.id, email: user.email, name: displayName, growerType: meta.grower_type || '' }, logout,
-    devices, selectedDevice, selectedDeviceId, setSelectedDeviceId, addDevice, claimDevice, setDevicePlant, updateDevice, removeDevice, factoryResetDevice, setIrrigation, runPump, isDemo,
+    devices, devicesReady, selectedDevice, selectedDeviceId, setSelectedDeviceId, addDevice, claimDevice, setDevicePlant, updateDevice, removeDevice, factoryResetDevice, setIrrigation, runPump, isDemo,
     alarmRules, addAlarmRule, addAlarmRules, updateAlarmRule, removeAlarmRule,
     settings, updateSettings,
     tier: TIERS[tierId] || TIERS.free, tierId, setTier, showPlans, openPlans, closePlans,

@@ -41,7 +41,7 @@ function useTheme(theme) {
 }
 
 function Shell() {
-  const { user, selectedDevice, devices, alarmRules, settings, showPlans, closePlans, journals, weather } = useApp();
+  const { user, selectedDevice, devices, devicesReady, alarmRules, settings, showPlans, closePlans, journals, weather } = useApp();
   const [tab, setTab] = useState('live');
   const [toast, setToast] = useState(null);
   const prevKeys = useRef(new Set());
@@ -74,6 +74,11 @@ function Shell() {
     return () => clearTimeout(t);
   }, [toast]);
 
+  // Wait for the account's devices to load from the cloud before deciding
+  // between the dashboard and the connect-your-first-device welcome.
+  if (!devicesReady) {
+    return <div style={{ padding: 80, textAlign: 'center' }} className="muted">Loading your plants...</div>;
+  }
   if (devices.length === 0) return <Onboarding />;
 
   const ActiveView = TABS.find((t) => t.id === tab).View;
