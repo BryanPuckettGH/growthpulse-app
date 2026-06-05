@@ -6,7 +6,7 @@ import { useState } from 'react';
 import { useApp } from '../store/AppContext';
 import { METRICS, METRIC_ORDER, clamp } from '../store/helpers';
 import { openAccountExport, downloadAccountPdf } from '../utils/accountExport';
-import { X, FileDown, Printer, Check } from 'lucide-react';
+import { X, FileDown, Printer, Check, Loader2 } from 'lucide-react';
 
 const DAY = 86400000;
 
@@ -61,7 +61,12 @@ export default function ExportSheet({ onClose }) {
   const [selDev, setSelDev] = useState(() => new Set(devices.map((d) => d.id)));
   const [selMet, setSelMet] = useState(() => new Set(METRIC_ORDER));
   const [busy, setBusy] = useState(false);
+  const [phase, setPhase] = useState('');
   const [err, setErr] = useState('');
+
+  // Don't let the sheet close mid-render (it would orphan the work and the
+  // user might think it failed). The X and backdrop are inert while busy.
+  const safeClose = () => { if (!busy) onClose(); };
 
   const toggle = (set, setter) => (id) => {
     const next = new Set(set);
@@ -98,6 +103,7 @@ export default function ExportSheet({ onClose }) {
     }
 
     setBusy(true);
+    setPhase('Gathering your sensor data…');
     try {
       const histories = {};
       await Promise.all(chosen.map(async (d) => {
@@ -120,25 +126,46 @@ export default function ExportSheet({ onClose }) {
         report: { rangeLabel, start, end, metrics, histories },
       };
       if (mode === 'print') {
+        setPhase('Opening the print view…');
         const ok = openAccountExport(opts);
-        if (!ok) { setErr('Your browser blocked the report window. Allow pop-ups and try again.'); setBusy(false); return; }
+        if (!ok) { setErr('Your browser blocked the report window. Allow pop-ups and try again.'); setBusy(false); setPhase(''); return; }
       } else {
+        setPhase('Rendering your PDF… this can take a few seconds.');
         await downloadAccountPdf(opts);
       }
       onClose();
     } catch {
       setErr('Could not build the report. Check your connection and try again.');
       setBusy(false);
+      setPhase('');
     }
   };
 
+  if (busy) {
+    return (
+      <div className="overlay">
+        <div className="sheet" onClick={(e) => e.stopPropagation()}>
+          <div className="sheet__grab" />
+          <div className="exp-loading">
+            <Loader2 className="exp-spin" size={40} />
+            <h2 style={{ margin: '14px 0 4px' }}>Building your report</h2>
+            <p className="muted center" style={{ maxWidth: 280 }}>{phase}</p>
+            <p className="muted center" style={{ fontSize: 11.5, marginTop: 10 }}>
+              Please keep this open — no need to click again.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="overlay" onClick={onClose}>
+    <div className="overlay" onClick={safeClose}>
       <div className="sheet" onClick={(e) => e.stopPropagation()}>
         <div className="sheet__grab" />
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <h2>Download report</h2>
-          <button className="iconbtn" onClick={onClose} aria-label="Close"><X size={18} /></button>
+          <button className="iconbtn" onClick={safeClose} aria-label="Close"><X size={18} /></button>
         </div>
         <p className="muted" style={{ marginTop: -6 }}>
           A full PDF report with graphs of your sensor history, an activity timeline, and your account summary.

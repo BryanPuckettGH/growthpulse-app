@@ -6,6 +6,9 @@ All notable changes to GrowthPulse, the web app and the device firmware.
 
 ## Web App
 
+### v2.9.1 — June 5, 2026
+- Report download now shows a clear loading screen with a spinner and step ("Gathering data…", "Rendering your PDF…") so it's obvious the work is in progress. The sheet won't close mid-render and the buttons can't be double-fired.
+
 ### v2.9.0 — June 5, 2026
 - Server-side PDF rendering: the Download button now renders the report through headless Chrome in the cloud, producing a true vector PDF with crisp, selectable text.
 - Automatic fallback: if the server is unavailable, slow, or the account is in demo mode, it silently falls back to the in-browser renderer — the download always works.
