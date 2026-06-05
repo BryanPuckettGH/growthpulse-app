@@ -103,6 +103,13 @@ export function recommendations(reading, ranges) {
     if (!metricConnected(k, reading)) out.push({ level: 'warn', text: MISSING[k] });
   });
 
+  // Low battery warning for battery-powered units (AC units skip this).
+  const pw = powerInfo(reading);
+  if (pw.mode === 'battery' && !pw.charging) {
+    if (pw.pct <= 10) out.push({ level: 'critical', text: `Battery critically low (${pw.pct}%). Charge or replace it now or the device will go offline.` });
+    else if (pw.pct <= 20) out.push({ level: 'warn', text: `Battery low (${pw.pct}%). Plan to charge it soon. A slower refresh rate also extends battery life.` });
+  }
+
   const sm = metricConnected('soilMoisturePercent', reading) ? reading.soilMoisturePercent : null;
   const t = metricConnected('airTemperatureF', reading) ? reading.airTemperatureF : null;
   const h = metricConnected('airHumidity', reading) ? reading.airHumidity : null;

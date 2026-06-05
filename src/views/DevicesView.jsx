@@ -30,7 +30,7 @@ export default function DevicesView() {
           <div className="device__name">{d.name}</div>
           <div className="device__meta">
             <span className="badge"><TransportIcon name={t.icon} color={t.color} />{t.label}</span>
-            <PowerBadge reading={d.reading} />
+            <PowerBadge reading={d.reading} compact />
             <span><span className="dot" style={{ background: d.online ? '#2ecc71' : '#cfd3d8', marginRight: 5 }} />{d.online ? 'Online' : 'Offline'}</span>
             {d.location && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><MapPin size={11} />{d.location}</span>}
           </div>

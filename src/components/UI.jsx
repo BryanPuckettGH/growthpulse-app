@@ -17,16 +17,17 @@ export function TransportIcon({ name, size = 13, color }) {
 }
 
 // Power chip: "AC" for plugged-in units, battery % (with charging bolt) otherwise.
-export function PowerBadge({ reading, size = 13 }) {
+// compact keeps it short for tight rows like the device cards.
+export function PowerBadge({ reading, size = 13, compact = false }) {
   const p = powerInfo(reading);
   if (p.mode === 'ac') {
-    return <span className="badge"><Plug size={size} />AC power</span>;
+    return <span className="badge"><Plug size={size} />{compact ? 'AC' : 'AC power'}</span>;
   }
   const Icon = p.charging ? BatteryCharging : p.pct > 50 ? BatteryFull : p.pct > 20 ? BatteryMedium : BatteryLow;
   const color = p.charging ? '#13a4ff' : p.pct > 50 ? '#2ecc71' : p.pct > 20 ? '#f4a52b' : '#ef4444';
   return (
     <span className="badge" style={{ color }}>
-      <Icon size={size + 2} color={color} />{p.pct}%{p.charging ? ' charging' : ''}
+      <Icon size={size + 2} color={color} />{p.pct}%{!compact && p.charging ? ' charging' : ''}
     </span>
   );
 }
