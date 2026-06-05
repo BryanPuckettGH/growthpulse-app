@@ -6,6 +6,9 @@ All notable changes to GrowthPulse, the web app and the device firmware.
 
 ## Web App
 
+### v2.8.1 — June 5, 2026
+- Report sheet now has two delivery buttons: "Download PDF" saves a real .pdf file directly, "Print report" opens the print dialog (paper, or sharpest save-as-PDF output).
+
 ### v2.8.0 — June 5, 2026
 - Full plant report: the Settings download is now a complete PDF report with per-sensor history graphs (ideal-range shading, min/avg/max, offline gaps) and a chronological activity timeline.
 - Report options: pick the time period (24h / 7 days / 30 days / everything / custom dates), which plants, and which sensors to include.

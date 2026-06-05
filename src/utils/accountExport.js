@@ -1,7 +1,12 @@
-// The full GrowthPulse plant report. Opens print-ready in a new tab, where
-// Save as PDF produces the customer-facing document: branded letterhead,
-// per-plant sensor graphs over the chosen period, an activity timeline,
-// and the account summary tables.
+// The full GrowthPulse plant report, delivered two ways:
+//   openAccountExport(...)  - opens a print-ready tab (browser print dialog,
+//                             sharpest output, good for paper too)
+//   downloadAccountPdf(...) - builds a real .pdf file in the browser and
+//                             saves it directly (html2pdf, loaded on demand)
+//
+// Both render the exact same document: branded letterhead, per-plant sensor
+// graphs over the chosen period, an activity timeline, and the account
+// summary tables.
 //
 // The caller (ExportSheet) decides the period, which plants and which
 // sensors, fetches each plant's history from the cloud, and hands it all in
@@ -21,7 +26,7 @@ const fmtDate = (ms) => new Date(ms).toLocaleDateString([], { year: 'numeric', m
 const fmtDateTime = (ms) => new Date(ms).toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' +
   new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
-/* ---------- inline SVG line chart (no libraries in the print tab) ---------- */
+/* ---------- inline SVG line chart (no libraries needed to view it) ---------- */
 function chartSvg(points, metricKey, band) {
   const m = METRICS[metricKey];
   const vals = points.map((p) => p[metricKey]).filter((v) => v != null);
@@ -111,7 +116,9 @@ function chartSvg(points, metricKey, band) {
   const max = Math.max(...vals);
   const avg = +(vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1);
 
-  const svg = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto;display:block">
+  // Explicit width/height (not just viewBox) so the rasterizer used by the
+  // direct-download path measures the SVG correctly.
+  const svg = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto;display:block">
     ${bandRect}${grid}${areas}${lines}${lastDot}
     <line x1="${L}" y1="${T + ih}" x2="${W - R}" y2="${T + ih}" stroke="#dfe3e8" stroke-width="1"/>
     ${xlabels}
@@ -120,8 +127,10 @@ function chartSvg(points, metricKey, band) {
   return { svg, min: +min.toFixed(1), max: +max.toFixed(1), avg, count: vals.length };
 }
 
-/* ---------- the document ---------- */
-export function openAccountExport({ user, devices, gateways = [], alarmRules = [], settings, journals = {}, tierId, report = null }) {
+/* ---------- the document (shared by print and download) ----------
+   Every CSS rule is scoped under .gp-doc so the download path can render the
+   report inside the app page without restyling the app itself. */
+function buildReport({ user, devices, gateways = [], alarmRules = [], settings, journals = {}, tierId, report = null }) {
   const now = new Date();
   const tier = TIERS[tierId] || TIERS.free;
   const metrics = (report && report.metrics && report.metrics.length ? report.metrics : METRIC_ORDER)
@@ -202,7 +211,7 @@ export function openAccountExport({ user, devices, gateways = [], alarmRules = [
     </div>`;
   }
 
-  /* --- summary tables (unchanged content) --- */
+  /* --- summary tables --- */
   const deviceRows = devices.map((d) => {
     const plant = PLANTS[d.plant] || PLANTS.generic;
     const t = TRANSPORTS[d.transport] || TRANSPORTS.wifi;
@@ -268,46 +277,44 @@ export function openAccountExport({ user, devices, gateways = [], alarmRules = [
        <div><div class="l">To</div><div class="v">${fmtDate(report.end)}</div></div>`
     : '';
 
-  const html = `<!doctype html>
-<html><head><meta charset="utf-8"/><title>GrowthPulse ${title} · ${esc(user.name)}</title>
-<style>
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #2c3e50; margin: 36px; }
-  .brand b { font-size: 26px; letter-spacing: -0.5px; }
-  .brand b span { color: #2ecc71; font-weight: 400; }
-  .tag { font-size: 10px; letter-spacing: 2.5px; color: #8a94a0; margin-top: 2px; }
-  .docline { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 2px solid #2ecc71; padding-bottom: 10px; margin-top: 22px; }
-  .docline h1 { font-size: 19px; margin: 0; }
-  .docline span { font-size: 12px; color: #6b7280; }
-  .meta { display: flex; gap: 36px; flex-wrap: wrap; margin: 16px 0 6px; }
-  .meta div { font-size: 13px; }
-  .meta .l { font-size: 10.5px; color: #8a94a0; text-transform: uppercase; letter-spacing: 0.6px; }
-  .meta .v { font-weight: 700; margin-top: 2px; }
-  h2 { font-size: 14px; margin: 26px 0 8px; color: #1a9b5a; }
-  h3 { font-size: 12.5px; margin: 14px 0 6px; }
-  table { border-collapse: collapse; width: 100%; }
-  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid #e8ebee; font-size: 12.5px; }
-  th { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.6px; color: #8a94a0; }
-  .plant { page-break-before: auto; margin-top: 8px; }
-  .plant__name { font-size: 16px; color: #2c3e50; margin: 26px 0 2px; border: 0; }
-  .plant__facts { font-size: 11.5px; color: #6b7280; margin-bottom: 10px; }
-  .chartcard { border: 1px solid #e8ebee; border-radius: 12px; padding: 10px 12px 8px; margin-bottom: 10px; page-break-inside: avoid; }
-  .chead { display: flex; align-items: center; gap: 8px; font-size: 12.5px; margin-bottom: 4px; }
-  .chead .cstat { margin-left: auto; font-size: 11px; color: #6b7280; font-weight: 400; }
-  .cdot { width: 9px; height: 9px; border-radius: 99px; display: inline-block; }
-  .bandnote { font-size: 10px; color: #9aa1aa; margin-top: 3px; }
-  .tl { border-left: 2px solid #e8ebee; margin: 6px 0 4px 64px; padding: 2px 0; }
-  .tl__row { display: flex; align-items: baseline; gap: 10px; margin: 9px 0; page-break-inside: avoid; }
-  .tl__date { width: 108px; margin-left: -124px; text-align: right; font-size: 10.5px; color: #8a94a0; flex-shrink: 0; }
-  .tl__dot { margin-left: -9px; font-size: 11px; background: #fff; flex-shrink: 0; }
-  .tl__text { font-size: 12.5px; }
-  .entry { border: 1px solid #e8ebee; border-radius: 10px; padding: 9px 12px; margin-bottom: 7px; font-size: 12.5px; page-break-inside: avoid; }
-  .edate { font-size: 10.5px; color: #8a94a0; margin-bottom: 3px; }
-  .entry img { max-width: 160px; border-radius: 8px; display: block; margin: 5px 0; }
-  .muted-sm { font-size: 11.5px; color: #8a94a0; margin: 4px 0 8px; }
-  .none { font-size: 12.5px; color: #8a94a0; }
-  .foot { margin-top: 30px; font-size: 10.5px; color: #9aa1aa; border-top: 1px solid #e8ebee; padding-top: 10px; line-height: 1.6; }
-</style></head>
-<body>
+  const css = `
+  .gp-doc { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #2c3e50; background: #fff; padding: 36px; }
+  .gp-doc .brand b { font-size: 26px; letter-spacing: -0.5px; }
+  .gp-doc .brand b span { color: #2ecc71; font-weight: 400; }
+  .gp-doc .tag { font-size: 10px; letter-spacing: 2.5px; color: #8a94a0; margin-top: 2px; }
+  .gp-doc .docline { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 2px solid #2ecc71; padding-bottom: 10px; margin-top: 22px; }
+  .gp-doc .docline h1 { font-size: 19px; margin: 0; }
+  .gp-doc .docline span { font-size: 12px; color: #6b7280; }
+  .gp-doc .meta { display: flex; gap: 36px; flex-wrap: wrap; margin: 16px 0 6px; }
+  .gp-doc .meta div { font-size: 13px; }
+  .gp-doc .meta .l { font-size: 10.5px; color: #8a94a0; text-transform: uppercase; letter-spacing: 0.6px; }
+  .gp-doc .meta .v { font-weight: 700; margin-top: 2px; }
+  .gp-doc h2 { font-size: 14px; margin: 26px 0 8px; color: #1a9b5a; }
+  .gp-doc h3 { font-size: 12.5px; margin: 14px 0 6px; }
+  .gp-doc table { border-collapse: collapse; width: 100%; }
+  .gp-doc th, .gp-doc td { text-align: left; padding: 7px 10px; border-bottom: 1px solid #e8ebee; font-size: 12.5px; }
+  .gp-doc th { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.6px; color: #8a94a0; }
+  .gp-doc .plant { margin-top: 8px; }
+  .gp-doc .plant__name { font-size: 16px; color: #2c3e50; margin: 26px 0 2px; border: 0; }
+  .gp-doc .plant__facts { font-size: 11.5px; color: #6b7280; margin-bottom: 10px; }
+  .gp-doc .chartcard { border: 1px solid #e8ebee; border-radius: 12px; padding: 10px 12px 8px; margin-bottom: 10px; page-break-inside: avoid; }
+  .gp-doc .chead { display: flex; align-items: center; gap: 8px; font-size: 12.5px; margin-bottom: 4px; }
+  .gp-doc .chead .cstat { margin-left: auto; font-size: 11px; color: #6b7280; font-weight: 400; }
+  .gp-doc .cdot { width: 9px; height: 9px; border-radius: 99px; display: inline-block; }
+  .gp-doc .bandnote { font-size: 10px; color: #9aa1aa; margin-top: 3px; }
+  .gp-doc .tl { border-left: 2px solid #e8ebee; margin: 6px 0 4px 64px; padding: 2px 0; }
+  .gp-doc .tl__row { display: flex; align-items: baseline; gap: 10px; margin: 9px 0; page-break-inside: avoid; }
+  .gp-doc .tl__date { width: 108px; margin-left: -124px; text-align: right; font-size: 10.5px; color: #8a94a0; flex-shrink: 0; }
+  .gp-doc .tl__dot { margin-left: -9px; font-size: 11px; background: #fff; flex-shrink: 0; }
+  .gp-doc .tl__text { font-size: 12.5px; }
+  .gp-doc .entry { border: 1px solid #e8ebee; border-radius: 10px; padding: 9px 12px; margin-bottom: 7px; font-size: 12.5px; page-break-inside: avoid; }
+  .gp-doc .edate { font-size: 10.5px; color: #8a94a0; margin-bottom: 3px; }
+  .gp-doc .entry img { max-width: 160px; border-radius: 8px; display: block; margin: 5px 0; }
+  .gp-doc .muted-sm { font-size: 11.5px; color: #8a94a0; margin: 4px 0 8px; }
+  .gp-doc .none { font-size: 12.5px; color: #8a94a0; }
+  .gp-doc .foot { margin-top: 30px; font-size: 10.5px; color: #9aa1aa; border-top: 1px solid #e8ebee; padding-top: 10px; line-height: 1.6; }`;
+
+  const body = `
   <div class="brand"><b>Growth<span>Pulse</span></b></div>
   <div class="tag">SMART PLANT MONITORING</div>
 
@@ -360,7 +367,19 @@ export function openAccountExport({ user, devices, gateways = [], alarmRules = [
     ${report ? `Sensor graphs cover ${esc(report.rangeLabel.toLowerCase())} and are averaged into chart buckets; gaps mean the device was offline.` : ''}
     This document was generated from the data stored for your GrowthPulse account.
     GrowthPulse · Smart Plant Monitoring · growthpulsecloud.com · FIU Senior Design
-  </div>
+  </div>`;
+
+  return { title, css, body, user };
+}
+
+/* ---------- delivery: print-ready tab ---------- */
+export function openAccountExport(opts) {
+  const { title, css, body, user } = buildReport(opts);
+  const html = `<!doctype html>
+<html><head><meta charset="utf-8"/><title>GrowthPulse ${title} · ${esc(user.name)}</title>
+<style>body { margin: 0; } ${css}</style></head>
+<body class="gp-doc">
+  ${body}
   <script>window.onload = function () { setTimeout(function () { window.print(); }, 350); };</script>
 </body></html>`;
 
@@ -369,4 +388,36 @@ export function openAccountExport({ user, devices, gateways = [], alarmRules = [
   w.document.write(html);
   w.document.close();
   return true;
+}
+
+/* ---------- delivery: direct .pdf download ---------- */
+export async function downloadAccountPdf(opts) {
+  const { title, css, body } = buildReport(opts);
+
+  // Render the report off-screen at US Letter width, then let html2pdf
+  // (loaded on demand so it never weighs down normal app loads) rasterize it
+  // into a paginated PDF and save the file.
+  const host = document.createElement('div');
+  host.style.cssText = 'position:fixed;left:-12000px;top:0;width:816px;background:#fff;z-index:-1;';
+  host.innerHTML = `<style>${css}</style><div class="gp-doc">${body}</div>`;
+  document.body.appendChild(host);
+
+  try {
+    const { default: html2pdf } = await import('html2pdf.js');
+    const stamp = new Date().toISOString().slice(0, 10);
+    await html2pdf()
+      .set({
+        margin: [0.35, 0.3, 0.45, 0.3],
+        filename: `GrowthPulse ${title} ${stamp}.pdf`,
+        image: { type: 'jpeg', quality: 0.95 },
+        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+        jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' },
+        pagebreak: { mode: ['css', 'legacy'] },
+      })
+      .from(host.querySelector('.gp-doc'))
+      .save();
+    return true;
+  } finally {
+    host.remove();
+  }
 }

@@ -5,8 +5,8 @@
 import { useState } from 'react';
 import { useApp } from '../store/AppContext';
 import { METRICS, METRIC_ORDER, clamp } from '../store/helpers';
-import { openAccountExport } from '../utils/accountExport';
-import { X, FileDown, Check } from 'lucide-react';
+import { openAccountExport, downloadAccountPdf } from '../utils/accountExport';
+import { X, FileDown, Printer, Check } from 'lucide-react';
 
 const DAY = 86400000;
 
@@ -71,7 +71,9 @@ export default function ExportSheet({ onClose }) {
   const toggleDev = toggle(selDev, setSelDev);
   const toggleMet = toggle(selMet, setSelMet);
 
-  const generate = async () => {
+  // mode: 'download' saves a real .pdf file; 'print' opens the print dialog
+  // (paper, or sharper Save-as-PDF output).
+  const generate = async (mode) => {
     setErr('');
     const chosen = devices.filter((d) => selDev.has(d.id));
     if (chosen.length === 0) { setErr('Pick at least one plant.'); return; }
@@ -113,11 +115,16 @@ export default function ExportSheet({ onClose }) {
       }));
 
       const metrics = METRIC_ORDER.filter((k) => selMet.has(k));
-      const ok = openAccountExport({
+      const opts = {
         user, devices: chosen, gateways, alarmRules, settings, journals, tierId,
         report: { rangeLabel, start, end, metrics, histories },
-      });
-      if (!ok) { setErr('Your browser blocked the report window. Allow pop-ups and try again.'); setBusy(false); return; }
+      };
+      if (mode === 'print') {
+        const ok = openAccountExport(opts);
+        if (!ok) { setErr('Your browser blocked the report window. Allow pop-ups and try again.'); setBusy(false); return; }
+      } else {
+        await downloadAccountPdf(opts);
+      }
       onClose();
     } catch {
       setErr('Could not build the report. Check your connection and try again.');
@@ -181,9 +188,13 @@ export default function ExportSheet({ onClose }) {
 
         {err && <p style={{ color: '#e74c3c', fontSize: 12.5, margin: '10px 0 0' }}>{err}</p>}
 
-        <button className="btn btn--green" style={{ marginTop: 16, width: '100%' }} onClick={generate} disabled={busy}>
+        <button className="btn btn--green" style={{ marginTop: 16, width: '100%' }} onClick={() => generate('download')} disabled={busy}>
           <FileDown size={15} style={{ verticalAlign: '-3px', marginRight: 6 }} />
-          {busy ? 'Building your report…' : 'Download PDF report'}
+          {busy ? 'Building your report…' : 'Download PDF'}
+        </button>
+        <button className="btn btn--ghost" style={{ marginTop: 8, width: '100%' }} onClick={() => generate('print')} disabled={busy}>
+          <Printer size={15} style={{ verticalAlign: '-3px', marginRight: 6 }} />
+          Print report
         </button>
         <p className="muted center" style={{ margin: '8px 0 0', fontSize: 11.5 }}>
           Long periods are averaged so graphs stay readable. Gaps mean the device was offline.
