@@ -6,6 +6,9 @@ All notable changes to GrowthPulse, the web app and the device firmware.
 
 ## Web App
 
+### v2.12.1 — June 5, 2026
+- The connection badge now reflects reality without any extra setup: a real node that's reporting data shows Wi-Fi (its actual link), even if LoRaWAN was selected. The transport picker explains that LoRaWAN node firmware is still in development and the node uses Wi-Fi today.
+
 ### v2.12.0 — June 5, 2026
 - First load no longer says "Offline". A claimed device that hasn't reported yet shows "Connecting…" (amber) until the first reading arrives, and the app polls immediately instead of waiting a full refresh cycle, so customers aren't scared into refreshing.
 - Honest connection: the dashboard and device cards now show how a node is ACTUALLY connected (Wi-Fi, with signal) based on what the node reports, instead of a transport label you picked. Needs firmware v2.3 and a `wifiRssi` number attribute in Losant.

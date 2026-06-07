@@ -303,11 +303,16 @@ function DeviceEditSheet({ device, onClose }) {
             </div>
           ))}
         </div>
-        {transport !== device.transport && (
+        {transport === 'lorawan' && (
           <p className="muted" style={{ fontSize: 12, margin: '-4px 2px 10px' }}>
-            The switch takes effect the next time the node powers on. Moving to Wi-Fi runs the usual
-            phone setup and updates every few seconds; moving to LoRaWAN just needs a gateway in range
-            and reports every few minutes, which greatly extends battery life.
+            LoRaWAN node firmware is still in development. Your node connects over Wi-Fi today, so the app
+            shows its real connection (Wi-Fi) until nodes can actually join through the gateway. The gateway
+            you added is ready for when that ships.
+          </p>
+        )}
+        {transport === 'wifi' && transport !== device.transport && (
+          <p className="muted" style={{ fontSize: 12, margin: '-4px 2px 10px' }}>
+            Takes effect the next time the node powers on. Wi-Fi runs the usual phone setup and updates every few seconds.
           </p>
         )}
         <button className="btn btn--green" disabled={busy} onClick={save}>{busy ? 'Saving...' : 'Save changes'}</button>
