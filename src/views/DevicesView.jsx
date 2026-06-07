@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useApp } from '../store/AppContext';
-import { TRANSPORTS, timeAgo } from '../store/helpers';
+import { TRANSPORTS, timeAgo, effectiveTransport } from '../store/helpers';
 import { TransportIcon, PowerBadge } from '../components/UI';
 import { geocodePlace } from '../utils/geocode';
 import { fileToThumb } from '../utils/image';
@@ -9,11 +9,12 @@ import AddDeviceSheet from '../components/AddDeviceSheet';
 import ClaimDeviceSheet from '../components/ClaimDeviceSheet';
 import DeviceAvatar from '../components/DeviceAvatar';
 import QrScanner from '../components/QrScanner';
+import ImageCropper from '../components/ImageCropper';
 
 // List of all devices (tap to select) plus add/claim, gateways, and full
 // device management: rename, home location, delete, and factory reset.
 export default function DevicesView() {
-  const { devices, selectedDeviceId, setSelectedDeviceId, addDevice, claimDevice, tier, openPlans, isDemo, gateways, addGateway, removeGateway } = useApp();
+  const { devices, selectedDeviceId, setSelectedDeviceId, addDevice, claimDevice, tier, openPlans, isDemo, gateways, addGateway, removeGateway, pollReady } = useApp();
   const [open, setOpen] = useState(false);
   const [gwOpen, setGwOpen] = useState(false);
   const [editId, setEditId] = useState(null);
@@ -25,7 +26,10 @@ export default function DevicesView() {
   const ungrouped = devices.filter((d) => !d.group);
 
   const card = (d) => {
-    const t = TRANSPORTS[d.transport] || TRANSPORTS.wifi;
+    const t = TRANSPORTS[effectiveTransport(d)] || TRANSPORTS.wifi;
+    // Before the first poll comes back, a claimed device that hasn't reported
+    // yet is "Connecting", not "Offline" (don't scare people into refreshing).
+    const connecting = d.losantDeviceId && !d.hasData && !pollReady;
     return (
       <div key={d.id} className={`device ${d.id === selectedDeviceId ? 'selected' : ''}`} onClick={() => setSelectedDeviceId(d.id)}>
         <DeviceAvatar device={d} fallbackColor={t.color} />
@@ -35,15 +39,15 @@ export default function DevicesView() {
             <span className="badge"><TransportIcon name={t.icon} color={t.color} />{t.label}</span>
             <PowerBadge reading={d.reading} compact />
             <span>
-              <span className="dot" style={{ background: d.online ? '#2ecc71' : '#cfd3d8', marginRight: 5 }} />
-              {d.online ? 'Online' : d.hasData ? `Offline · ${timeAgo(d.lastSeen)}` : 'Offline'}
+              <span className="dot" style={{ background: d.online ? '#2ecc71' : connecting ? '#f4a52b' : '#cfd3d8', marginRight: 5 }} />
+              {d.online ? 'Online' : connecting ? 'Connecting…' : d.hasData ? `Offline · ${timeAgo(d.lastSeen)}` : 'Offline'}
             </span>
             {d.location && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><MapPin size={11} />{d.location}</span>}
           </div>
         </div>
         <div className="device__reading">
           <div className="device__big">{d.hasData ? `${d.reading.soilMoisturePercent}%` : '—'}</div>
-          <div className="device__small">{d.hasData ? 'moisture' : 'connecting'}</div>
+          <div className="device__small">{d.hasData ? 'moisture' : connecting ? 'connecting' : 'offline'}</div>
         </div>
         <button className="device__edit" onClick={(e) => { e.stopPropagation(); setEditId(d.id); }} aria-label="Edit device"><Pencil size={16} /></button>
       </div>
@@ -184,14 +188,17 @@ function DeviceEditSheet({ device, onClose }) {
   const [transport, setTransport] = useState(device.transport);
   const [group, setGroup] = useState(device.group || '');
   const [photo, setPhoto] = useState(device.photo || null);
+  const [cropSrc, setCropSrc] = useState(null); // image awaiting crop
   const groupSuggestions = [...new Set(devices.map((x) => x.group).filter(Boolean))];
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState(null); // null | 'remove' | 'reset'
 
   const onPickPhoto = async (e) => {
     const file = e.target.files && e.target.files[0];
+    e.target.value = ''; // let the same file be re-picked later
     if (!file) return;
-    setPhoto(await fileToThumb(file, 512)); // small square-ish avatar, syncs with the device
+    // Downscale to a sane working size, then let the user crop it square.
+    setCropSrc(await fileToThumb(file, 1280));
   };
 
   const save = async () => {
@@ -250,6 +257,7 @@ function DeviceEditSheet({ device, onClose }) {
   }
 
   return (
+    <>
     <div className="overlay" onClick={onClose}>
       <div className="sheet" onClick={(e) => e.stopPropagation()}>
         <div className="sheet__grab" />
@@ -315,5 +323,13 @@ function DeviceEditSheet({ device, onClose }) {
         </div>
       </div>
     </div>
+    {cropSrc && (
+      <ImageCropper
+        src={cropSrc}
+        onCancel={() => setCropSrc(null)}
+        onDone={(cropped) => { setPhoto(cropped); setCropSrc(null); }}
+      />
+    )}
+    </>
   );
 }

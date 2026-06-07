@@ -230,6 +230,15 @@ export const TRANSPORTS = {
   lorawan: { label: 'LoRaWAN', icon: 'lora', color: '#a06bff' },
 };
 
+// How a device is ACTUALLY connected right now. If the node reported a Wi-Fi
+// signal (wifiRssi), it's verified on Wi-Fi regardless of the label the user
+// picked; otherwise fall back to the configured transport. This keeps the app
+// honest: a Wi-Fi node never shows as LoRaWAN.
+export function effectiveTransport(device) {
+  if (device && device.reading && device.reading.wifiRssi != null) return 'wifi';
+  return (device && device.transport) || 'wifi';
+}
+
 // --- display helpers for units and trends ---
 const TEMP_KEYS = ['airTemperatureF', 'soilTemperatureF'];
 

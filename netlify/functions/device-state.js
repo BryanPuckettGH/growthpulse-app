@@ -34,6 +34,9 @@ export const handler = async (event) => {
       // Battery-powered units (future firmware) report these; AC units don't.
       batteryPct: num('batteryPct'),
       charging: bool('charging'),
+      // Live link signal. Present => the node verified it's on Wi-Fi, so the
+      // app shows the real connection instead of a user-chosen label.
+      wifiRssi: num('wifiRssi'),
       time: s.soilMoisturePercent ? new Date(s.soilMoisturePercent.time).getTime() : Date.now(),
     };
     return {

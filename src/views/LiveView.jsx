@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useApp } from '../store/AppContext';
 import {
   METRICS, PLANTS, statusOf, healthScore, recommendations, rangesForDevice, TRANSPORTS,
-  displayValue, displayUnit, trendOf, metricConnected, timeAgo,
+  displayValue, displayUnit, trendOf, metricConnected, timeAgo, effectiveTransport,
 } from '../store/helpers';
 import { MetricIcon, TransportIcon, Gauge, statusColor, PowerBadge } from '../components/UI';
 import Chart from '../components/Chart';
@@ -34,17 +34,24 @@ function LockedWeather({ onUpgrade }) {
   );
 }
 
-function DeviceWaiting({ device }) {
+function DeviceWaiting({ device, connecting }) {
   return (
     <div className="card" style={{ textAlign: 'center', padding: '34px 18px' }}>
       <img src="/growthpulse-icon.svg" alt="" style={{ width: 56, height: 56, margin: '0 auto 12px', display: 'block', opacity: 0.85 }} />
       <div style={{ fontWeight: 700, fontSize: 18 }}>{device.name}</div>
-      <p className="muted" style={{ marginTop: 6 }}>
-        Waiting for the first reading. Make sure your device is powered on and connected to Wi-Fi.
-        Readings appear here automatically once it reports in.
-      </p>
+      {connecting ? (
+        <p className="muted" style={{ marginTop: 6 }}>
+          Connecting to your device and loading its latest readings. This usually takes a few seconds.
+        </p>
+      ) : (
+        <p className="muted" style={{ marginTop: 6 }}>
+          Waiting for the first reading. Make sure your device is powered on and connected to Wi-Fi.
+          Readings appear here automatically once it reports in.
+        </p>
+      )}
       <div className="device__meta" style={{ justifyContent: 'center', marginTop: 8 }}>
-        <span className="dot" style={{ background: '#cfd3d8', marginRight: 6 }} />Offline
+        <span className="dot" style={{ background: connecting ? '#f4a52b' : '#cfd3d8', marginRight: 6 }} />
+        {connecting ? 'Connecting…' : 'Offline'}
       </div>
     </div>
   );
@@ -91,19 +98,22 @@ function RainPausePrompt() {
 }
 
 export default function LiveView() {
-  const { selectedDevice, settings, setDevicePlant, tier, openPlans } = useApp();
+  const { selectedDevice, settings, setDevicePlant, tier, openPlans, pollReady } = useApp();
   const r = selectedDevice.reading;
   const u = settings.units;
   const ranges = rangesForDevice(selectedDevice);
   const health = healthScore(r, ranges);
   const recs = recommendations(r, ranges);
-  const t = TRANSPORTS[selectedDevice.transport] || TRANSPORTS.wifi;
+  const t = TRANSPORTS[effectiveTransport(selectedDevice)] || TRANSPORTS.wifi;
   const healthColor = health >= 80 ? '#2ecc71' : health >= 55 ? '#f4a52b' : '#ef4444';
   const plant = PLANTS[selectedDevice.plant] || PLANTS.generic;
   const [detailKey, setDetailKey] = useState(null);
   const [plantOpen, setPlantOpen] = useState(false);
 
-  if (!selectedDevice.hasData) return <DeviceWaiting device={selectedDevice} />;
+  if (!selectedDevice.hasData) {
+    const connecting = selectedDevice.losantDeviceId && !pollReady;
+    return <DeviceWaiting device={selectedDevice} connecting={connecting} />;
+  }
 
   return (
     <div>

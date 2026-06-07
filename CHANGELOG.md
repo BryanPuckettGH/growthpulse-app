@@ -6,6 +6,11 @@ All notable changes to GrowthPulse, the web app and the device firmware.
 
 ## Web App
 
+### v2.12.0 — June 5, 2026
+- First load no longer says "Offline". A claimed device that hasn't reported yet shows "Connecting…" (amber) until the first reading arrives, and the app polls immediately instead of waiting a full refresh cycle, so customers aren't scared into refreshing.
+- Honest connection: the dashboard and device cards now show how a node is ACTUALLY connected (Wi-Fi, with signal) based on what the node reports, instead of a transport label you picked. Needs firmware v2.3 and a `wifiRssi` number attribute in Losant.
+- Device photo: crop the picture after taking/choosing it (square, pan and zoom).
+
 ### v2.11.0 — June 5, 2026
 - Device photos: add a picture to any plant/node (camera or upload). It shows on the device cards, the dashboard, and follows your account across browsers. Requires the one-line `docs/growthpulse-devices-photo.sql` migration.
 - Add-a-gateway now uses the Gateway EUI (the 16-hex ID on the label's EUI line) instead of a generic code, that's the identifier a LoRaWAN network server needs. You can scan the label's QR (the app pulls the EUI out of the bundled MAC/EUI/serial payload) or type it.
@@ -105,6 +110,10 @@ All notable changes to GrowthPulse, the web app and the device firmware.
 ---
 
 ## Device Firmware (GP_Provisioning)
+
+### v2.3 — June 5, 2026
+- Boot sensor self-test now holds on screen for 10 seconds so it's readable.
+- Reports Wi-Fi signal strength (`wifiRssi`) in telemetry so the app can show the node's real connection instead of a user-set label.
 
 ### v2.2 — June 5, 2026
 - Rotating status screen: the OLED cycles every ~5 seconds through the pairing code + connection state, a connection page (link type, Wi-Fi signal in dBm, IP address), and live sensor readings. Disconnected probes read "--" honestly.

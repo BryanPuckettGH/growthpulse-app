@@ -368,6 +368,18 @@ input[type='range'].slider::-moz-range-thumb {
 }
 .exp-box.on { background: var(--green); border-color: var(--green); }
 
+/* ---------- Image cropper ---------- */
+.cropbox {
+  position: relative; margin: 8px auto 0; overflow: hidden; border-radius: 16px;
+  background: #0b0e12; touch-action: none; cursor: grab; user-select: none;
+}
+.cropbox:active { cursor: grabbing; }
+.cropbox img { pointer-events: none; }
+.cropbox__ring {
+  position: absolute; inset: 0; pointer-events: none; border-radius: 16px;
+  box-shadow: inset 0 0 0 2px rgba(255,255,255,0.9);
+}
+
 /* ---------- QR scanner ---------- */
 .qrframe { position: relative; width: 100%; aspect-ratio: 1 / 1; background: #000; border-radius: 16px; overflow: hidden; }
 .qrframe video { width: 100%; height: 100%; object-fit: cover; display: block; }

@@ -28,9 +28,10 @@
 #define SOIL_PIN 2                // Soil on GPIO2 (GPIO1 is tied to battery-sense)
 #define RESET_BTN 0               // PRG button (GPIO0): hold 3s to redo Wi-Fi setup
 
-#define FW_VERSION "2.2"          // shown on the boot self-test screen (see CHANGELOG.md)
+#define FW_VERSION "2.3"          // shown on the boot self-test screen (see CHANGELOG.md)
 #define WDT_TIMEOUT_S 60          // reboot if the firmware hangs this long
 #define DIM_AFTER_MS (5UL * 60UL * 1000UL)  // dim the OLED after 5 idle minutes
+#define SELFTEST_HOLD_MS 10000    // hold the sensor self-test on screen this long to read it
 
 // How this unit reaches the cloud, shown on screen so the customer can SEE it.
 // This firmware build is Wi-Fi. A future LoRaWAN build flips LINK_LABEL to
@@ -296,7 +297,7 @@ void bootSelfTest() {
 
   Serial.printf("Self-test: soilTemp=%s air=%s moisture=%s (raw=%d)\n",
                 soilT ? "OK" : "missing", air ? "OK" : "missing", moist ? "OK" : "missing", raw);
-  delay(2500);
+  delay(SELFTEST_HOLD_MS);   // runs before the watchdog is armed, so a long hold is safe
 }
 
 void onSetupPortal(WiFiManager* mgr) {
@@ -464,6 +465,10 @@ void sendTelemetry() {
   root["airHumidity"] = airHumidity;
   root["soilRaw"] = soilRaw;
   root["soilMoisturePercent"] = soilMoisturePercent;
+  // Report the live link so the app can show how this node is ACTUALLY
+  // connected (Wi-Fi + signal), not a label the user picked. A LoRaWAN build
+  // would omit this, letting the app fall back to showing LoRaWAN.
+  root["wifiRssi"] = WiFi.RSSI();
   device.sendState(root);
 
   Serial.print("Sent  moisture=");
