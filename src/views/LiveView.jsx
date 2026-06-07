@@ -115,7 +115,9 @@ export default function LiveView() {
       )}
       <RainPausePrompt />
       <button className="plantbar" onClick={() => setPlantOpen(true)}>
-        <span className="plantbar__emoji">{plant.emoji}</span>
+        {selectedDevice.photo
+          ? <img src={selectedDevice.photo} alt="" className="plantbar__photo" />
+          : <span className="plantbar__emoji">{plant.emoji}</span>}
         <span className="plantbar__txt">
           <span className="plantbar__label">Plant profile</span>
           <span className="plantbar__name">{plant.name}</span>

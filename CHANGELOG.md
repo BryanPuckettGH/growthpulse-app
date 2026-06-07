@@ -6,6 +6,10 @@ All notable changes to GrowthPulse, the web app and the device firmware.
 
 ## Web App
 
+### v2.11.0 — June 5, 2026
+- Device photos: add a picture to any plant/node (camera or upload). It shows on the device cards, the dashboard, and follows your account across browsers. Requires the one-line `docs/growthpulse-devices-photo.sql` migration.
+- Add-a-gateway now uses the Gateway EUI (the 16-hex ID on the label's EUI line) instead of a generic code, that's the identifier a LoRaWAN network server needs. You can scan the label's QR (the app pulls the EUI out of the bundled MAC/EUI/serial payload) or type it.
+
 ### v2.10.0 — June 5, 2026
 - Location is now fully optional. The app never asks for your device/GPS location and never shows a fake default city. A plant's location is only used by weather features, and you add it yourself (city or ZIP) when you want them.
 - New **Rain delay** (Pro): skip automatic watering when rain is in the local forecast. Because it needs the forecast where the plant lives, turning it on asks for that plant's location and explains why; the switch names the node that still needs one.
@@ -101,6 +105,10 @@ All notable changes to GrowthPulse, the web app and the device firmware.
 ---
 
 ## Device Firmware (GP_Provisioning)
+
+### v2.2 — June 5, 2026
+- Rotating status screen: the OLED cycles every ~5 seconds through the pairing code + connection state, a connection page (link type, Wi-Fi signal in dBm, IP address), and live sensor readings. Disconnected probes read "--" honestly.
+- The screen now states the active link ("Wi-Fi"); a future LoRaWAN build flips `LINK_LABEL` so the unit always shows the truth of how it's connected.
 
 ### v2.1 — June 5, 2026
 - Boot self-test: POST-style checklist on the OLED (soil temp / air / moisture) before going online.

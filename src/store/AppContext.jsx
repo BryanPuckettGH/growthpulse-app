@@ -81,6 +81,7 @@ function rowToDevice(r) {
     transport: r.transport,
     plant: r.plant,
     irrigation: r.irrigation || undefined,
+    photo: r.photo || undefined,
     losantDeviceId: r.losant_device_id,
     // When the plant joined this account; the report's "Everything" range
     // and the activity timeline both start here.
@@ -178,6 +179,7 @@ export function AppProvider({ children }) {
     if ('transport' in patch) map.transport = patch.transport;
     if ('plant' in patch) map.plant = patch.plant;
     if ('irrigation' in patch) map.irrigation = patch.irrigation;
+    if ('photo' in patch) map.photo = patch.photo ?? null;
     if (Object.keys(map).length === 0) return;
     supabase.from('devices').update(map).eq('id', id).then(() => {});
   }, [isDemo]);
@@ -282,10 +284,10 @@ export function AppProvider({ children }) {
     return () => { cancelled = true; };
   }, [settings.units, pinnedGeo && pinnedGeo.lat, pinnedGeo && pinnedGeo.lon]); // eslint-disable-line react-hooks/exhaustive-deps
   // Demo devices persist in the browser; real accounts persist in the cloud.
-  const deviceSig = devices.map((d) => `${d.id}|${d.name}|${d.location}|${d.transport}|${d.plant}|${JSON.stringify(d.irrigation)}|${d.losantDeviceId || ''}|${d.geo ? d.geo.lat + ',' + d.geo.lon : ''}|${d.group || ''}`).join(',');
+  const deviceSig = devices.map((d) => `${d.id}|${d.name}|${d.location}|${d.transport}|${d.plant}|${JSON.stringify(d.irrigation)}|${d.losantDeviceId || ''}|${d.geo ? d.geo.lat + ',' + d.geo.lon : ''}|${d.group || ''}|${d.photo ? d.photo.length : 0}`).join(',');
   useEffect(() => {
     if (!isDemo) return;
-    save('devices', devices.map((d) => ({ id: d.id, name: d.name, location: d.location, transport: d.transport, plant: d.plant, irrigation: d.irrigation, losantDeviceId: d.losantDeviceId, geo: d.geo, group: d.group })));
+    save('devices', devices.map((d) => ({ id: d.id, name: d.name, location: d.location, transport: d.transport, plant: d.plant, irrigation: d.irrigation, losantDeviceId: d.losantDeviceId, geo: d.geo, group: d.group, photo: d.photo })));
   }, [deviceSig]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const addDevice = useCallback((name, location, transport) => {

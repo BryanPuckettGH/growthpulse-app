@@ -3,9 +3,12 @@ import { useApp } from '../store/AppContext';
 import { TRANSPORTS, timeAgo } from '../store/helpers';
 import { TransportIcon, PowerBadge } from '../components/UI';
 import { geocodePlace } from '../utils/geocode';
-import { Plus, Sprout, Lock, Pencil, Trash2, RefreshCcw, AlertTriangle, MapPin, RadioTower } from 'lucide-react';
+import { fileToThumb } from '../utils/image';
+import { Plus, Sprout, Lock, Pencil, Trash2, RefreshCcw, AlertTriangle, MapPin, RadioTower, Camera, QrCode } from 'lucide-react';
 import AddDeviceSheet from '../components/AddDeviceSheet';
 import ClaimDeviceSheet from '../components/ClaimDeviceSheet';
+import DeviceAvatar from '../components/DeviceAvatar';
+import QrScanner from '../components/QrScanner';
 
 // List of all devices (tap to select) plus add/claim, gateways, and full
 // device management: rename, home location, delete, and factory reset.
@@ -25,7 +28,7 @@ export default function DevicesView() {
     const t = TRANSPORTS[d.transport] || TRANSPORTS.wifi;
     return (
       <div key={d.id} className={`device ${d.id === selectedDeviceId ? 'selected' : ''}`} onClick={() => setSelectedDeviceId(d.id)}>
-        <div className="device__avatar" style={{ background: t.color + '1a' }}><Sprout size={22} color={t.color} /></div>
+        <DeviceAvatar device={d} fallbackColor={t.color} />
         <div className="device__main">
           <div className="device__name">{d.name}</div>
           <div className="device__meta">
@@ -91,7 +94,7 @@ export default function DevicesView() {
                 <div className="device__meta">
                   <span className="badge" style={{ color: '#a06bff' }}><RadioTower size={13} color="#a06bff" />Gateway</span>
                   <span><span className="dot" style={{ background: '#2ecc71', marginRight: 5 }} />Linked</span>
-                  <span>code {g.code}</span>
+                  <span>EUI {g.code}</span>
                 </div>
               </div>
               <button className="device__edit" onClick={() => removeGateway(g.id)} aria-label="Remove gateway"><Trash2 size={16} /></button>
@@ -120,12 +123,22 @@ export default function DevicesView() {
 
 function GatewaySheet({ onClose, onAdd }) {
   const [name, setName] = useState('');
-  const [code, setCode] = useState('');
+  const [eui, setEui] = useState('');
   const [error, setError] = useState('');
+  const [scanning, setScanning] = useState(false);
 
+  // The Gateway EUI is the 16 hex-digit ID on the label's "EUI:" line (colons
+  // optional). It's the identifier a LoRaWAN network server registers. The
+  // label's QR bundles it with the two MACs and the serial, so a scan extracts
+  // just the EUI (see utils/eui.js).
   const submit = () => {
-    if (!code.trim()) { setError('Enter the pairing code from the gateway label.'); return; }
-    onAdd(name.trim() || 'My Gateway', code.trim());
+    const hex = eui.replace(/[^0-9a-fA-F]/g, '').toUpperCase();
+    if (hex.length !== 16) {
+      setError('The Gateway EUI is 16 hex characters. Scan the label QR, or copy the "EUI:" line (colons are fine).');
+      return;
+    }
+    const pretty = hex.match(/.{2}/g).join(':'); // E4:38:19:FF:FE:2A:58:80
+    onAdd(name.trim() || 'My Gateway', pretty);
     onClose();
   };
 
@@ -135,20 +148,31 @@ function GatewaySheet({ onClose, onAdd }) {
         <div className="sheet__grab" />
         <h2>Add a LoRaWAN gateway</h2>
         <p className="muted" style={{ marginTop: -6, marginBottom: 12 }}>
-          Plug the gateway into your router with the included cable (or set up its Wi-Fi), then enter
-          the pairing code from the label on its base. Nodes within range join through it automatically.
+          Plug the gateway into your router with the included cable (or set up its Wi-Fi). Then add its
+          <b> Gateway EUI</b>, the ID on the label's <b>EUI:</b> line (for the ThinkNode G1 it looks like
+          <code> e4:38:19:ff:fe:2a:58:80</code>). Scan the label's QR or type it. Nodes within range join automatically.
         </p>
 
         <div className="fieldlabel">Gateway name</div>
         <input className="input" placeholder="e.g. Barn Gateway" value={name} onChange={(e) => setName(e.target.value)} />
 
-        <div className="fieldlabel">Pairing code (on the gateway label)</div>
-        <input className="input" placeholder="e.g. GW-91D2" value={code} onChange={(e) => setCode(e.target.value)} />
+        <div className="fieldlabel">Gateway EUI</div>
+        <button className="btn btn--ghost" style={{ marginBottom: 8 }} onClick={() => { setError(''); setScanning(true); }}>
+          <QrCode size={15} style={{ verticalAlign: '-3px', marginRight: 6 }} />Scan QR on the label
+        </button>
+        <input className="input" placeholder="or type e4:38:19:ff:fe:2a:58:80" value={eui} onChange={(e) => setEui(e.target.value)} autoCapitalize="characters" />
 
         {error && <p className="center" style={{ color: 'var(--red)', fontSize: 13, margin: '0 0 10px' }}>{error}</p>}
 
         <button className="btn btn--green" onClick={submit}>Add gateway</button>
       </div>
+
+      {scanning && (
+        <QrScanner
+          onResult={(found) => { setEui(found); setScanning(false); }}
+          onClose={() => setScanning(false)}
+        />
+      )}
     </div>
   );
 }
@@ -159,13 +183,21 @@ function DeviceEditSheet({ device, onClose }) {
   const [location, setLocation] = useState(device.location);
   const [transport, setTransport] = useState(device.transport);
   const [group, setGroup] = useState(device.group || '');
+  const [photo, setPhoto] = useState(device.photo || null);
   const groupSuggestions = [...new Set(devices.map((x) => x.group).filter(Boolean))];
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState(null); // null | 'remove' | 'reset'
 
+  const onPickPhoto = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    setPhoto(await fileToThumb(file, 512)); // small square-ish avatar, syncs with the device
+  };
+
   const save = async () => {
     setBusy(true);
     let patch = { name: name.trim() || device.name, transport, group: group.trim() || undefined };
+    if (photo !== (device.photo || null)) patch.photo = photo || null;
     const loc = location.trim();
     if (loc && loc !== device.location) {
       // Re-pin the plant's home: geocode the new place for weather.
@@ -222,6 +254,22 @@ function DeviceEditSheet({ device, onClose }) {
       <div className="sheet" onClick={(e) => e.stopPropagation()}>
         <div className="sheet__grab" />
         <h2>Edit device</h2>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
+          <DeviceAvatar device={{ ...device, photo }} size={64} radius={16} />
+          <div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <label className="btn btn--ghost" style={{ width: 'auto', padding: '0 14px', cursor: 'pointer' }}>
+                <Camera size={15} style={{ verticalAlign: '-3px', marginRight: 6 }} />{photo ? 'Change photo' : 'Add photo'}
+                <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={onPickPhoto} />
+              </label>
+              {photo && (
+                <button className="btn btn--ghost" style={{ width: 'auto', padding: '0 14px' }} onClick={() => setPhoto(null)}>Remove</button>
+              )}
+            </div>
+            <p className="muted" style={{ fontSize: 12, margin: '6px 2px 0' }}>A photo of the plant or spot this node watches.</p>
+          </div>
+        </div>
 
         <div className="fieldlabel">Plant name</div>
         <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Device name" />

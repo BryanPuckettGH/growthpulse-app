@@ -28,9 +28,16 @@
 #define SOIL_PIN 2                // Soil on GPIO2 (GPIO1 is tied to battery-sense)
 #define RESET_BTN 0               // PRG button (GPIO0): hold 3s to redo Wi-Fi setup
 
-#define FW_VERSION "2.1"          // shown on the boot self-test screen (see CHANGELOG.md)
+#define FW_VERSION "2.2"          // shown on the boot self-test screen (see CHANGELOG.md)
 #define WDT_TIMEOUT_S 60          // reboot if the firmware hangs this long
 #define DIM_AFTER_MS (5UL * 60UL * 1000UL)  // dim the OLED after 5 idle minutes
+
+// How this unit reaches the cloud, shown on screen so the customer can SEE it.
+// This firmware build is Wi-Fi. A future LoRaWAN build flips LINK_LABEL to
+// "LoRaWAN" (and replaces the Wi-Fi stack), so the screen always tells the truth.
+#define LINK_LABEL "Wi-Fi"
+#define PAGE_MS 5000              // cycle the status screen every ~5 seconds
+#define PAGE_COUNT 3             // pair code -> connection -> live readings
 
 // ----------------- On-board OLED (Heltec V3) -----------------
 #define VEXT_PIN 36
@@ -97,6 +104,10 @@ int soilMoisturePercent = 0;
 unsigned long lastInteraction = 0;
 bool oledDimmed = false;
 
+// Rotating status screen state.
+int screenPage = 0;
+unsigned long lastPageSwitch = 0;
+
 // ============================================================
 // On-board OLED helpers
 // ============================================================
@@ -154,13 +165,90 @@ void oledSetup() {
   oled.sendBuffer();
 }
 
-void oledStatus(bool online) {
+// Draw a string ending at x (right-aligned), handy for value columns.
+void drawRight(int x, int y, const char* s) {
+  oled.drawStr(x - oled.getStrWidth(s), y, s);
+}
+
+// A small header row shared by the detail pages: title left, link state right.
+void pageHeader(const char* title, bool online) {
+  oled.setFont(u8g2_font_6x12_tr);
+  oled.drawStr(2, 11, title);
+  oled.setFont(u8g2_font_6x10_tr);
+  drawRight(126, 10, online ? LINK_LABEL : LINK_LABEL " --");
+  oled.drawHLine(0, 14, 128);
+}
+
+// Page 0: the big pairing code, with the live link state in the corner.
+void pagePairCode(bool online) {
   oled.clearBuffer();
   oled.setFont(u8g2_font_6x10_tr);
   oled.drawStr(2, 9, "PAIR CODE");
-  oled.drawStr(108, 9, online ? "ON" : "..");
-  drawBigCentered(pairCode().c_str(), 54);
+  drawRight(126, 9, online ? LINK_LABEL " ON" : LINK_LABEL " ..");
+  drawBigCentered(pairCode().c_str(), 56);
   oled.sendBuffer();
+}
+
+// Page 1: how it's connected, what its signal is, and its address.
+void pageConnection(bool online) {
+  oled.clearBuffer();
+  pageHeader("CONNECTION", online);
+  oled.setFont(u8g2_font_6x10_tr);
+  char val[24];
+  oled.drawStr(2, 28, "Link");
+  drawRight(126, 28, LINK_LABEL);
+  if (online) {
+    snprintf(val, sizeof(val), "%ld dBm", (long)WiFi.RSSI());
+    oled.drawStr(2, 41, "Signal");
+    drawRight(126, 41, val);
+    oled.drawStr(2, 54, "IP");
+    drawRight(126, 54, WiFi.localIP().toString().c_str());
+  } else {
+    oled.drawStr(2, 44, "Connecting...");
+  }
+  oled.sendBuffer();
+}
+
+// Page 2: the live sensor readings, disconnected probes shown honestly as "--".
+void pageReadings() {
+  oled.clearBuffer();
+  pageHeader("LIVE READINGS", true);
+  oled.setFont(u8g2_font_6x10_tr);
+  char val[24];
+
+  oled.drawStr(2, 28, "Air");
+  if (!isnan(airTemperatureF) && !isnan(airHumidity) && airHumidity > 0)
+    snprintf(val, sizeof(val), "%.1fF %.0f%%", airTemperatureF, airHumidity);
+  else snprintf(val, sizeof(val), "--");
+  drawRight(126, 28, val);
+
+  oled.drawStr(2, 41, "Soil temp");
+  if (soilTemperatureF > -100) snprintf(val, sizeof(val), "%.1fF", soilTemperatureF);
+  else snprintf(val, sizeof(val), "--");
+  drawRight(126, 41, val);
+
+  oled.drawStr(2, 54, "Moisture");
+  if (soilRaw > 300) snprintf(val, sizeof(val), "%d%%", soilMoisturePercent);
+  else snprintf(val, sizeof(val), "--");
+  drawRight(126, 54, val);
+
+  oled.sendBuffer();
+}
+
+// Show whichever page is current in the rotation.
+void oledShowPage(int page, bool online) {
+  switch (page) {
+    case 1:  pageConnection(online); break;
+    case 2:  pageReadings();         break;
+    default: pagePairCode(online);   break;
+  }
+}
+
+// Backward-compatible alias used right after Wi-Fi connects: show page 0.
+void oledStatus(bool online) {
+  screenPage = 0;
+  lastPageSwitch = millis();
+  pagePairCode(online);
 }
 
 // OLED burn-in protection: dim after idle, restore on any button press.
@@ -425,14 +513,22 @@ void loop() {
   readSensors();
   sendTelemetry();
   device.loop();
-  oledStatus(WiFi.status() == WL_CONNECTED && device.connected());
+
+  bool online = WiFi.status() == WL_CONNECTED && device.connected();
+  oledShowPage(screenPage, online);   // redraw current page with fresh values
 
   // Wait ~3s between sends, but keep watching PRG so a 3s hold resets Wi-Fi,
-  // and manage the screen dimmer while we wait.
+  // manage the screen dimmer, and cycle the status screen every ~5s so the
+  // customer can see the pairing code, the connection, and live readings.
   unsigned long waitStart = millis();
   while (millis() - waitStart < 3000) {
     maybeResetWifi();
     updateScreenPower();
+    if (millis() - lastPageSwitch >= PAGE_MS) {
+      lastPageSwitch = millis();
+      screenPage = (screenPage + 1) % PAGE_COUNT;
+      oledShowPage(screenPage, WiFi.status() == WL_CONNECTED && device.connected());
+    }
     delay(20);
   }
 }
