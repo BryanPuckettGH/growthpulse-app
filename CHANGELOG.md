@@ -6,6 +6,9 @@ All notable changes to GrowthPulse, the web app and the device firmware.
 
 ## Web App
 
+### v2.12.2 — June 5, 2026
+- A device that's still checking in now shows "Connecting…" for up to 15 seconds instead of briefly flashing "Offline" before its first reading lands. Matches the few seconds a node needs to report after the page loads.
+
 ### v2.12.1 — June 5, 2026
 - The connection badge now reflects reality without any extra setup: a real node that's reporting data shows Wi-Fi (its actual link), even if LoRaWAN was selected. The transport picker explains that LoRaWAN node firmware is still in development and the node uses Wi-Fi today.
 

@@ -98,7 +98,7 @@ function RainPausePrompt() {
 }
 
 export default function LiveView() {
-  const { selectedDevice, settings, setDevicePlant, tier, openPlans, pollReady } = useApp();
+  const { selectedDevice, settings, setDevicePlant, tier, openPlans, isConnecting } = useApp();
   const r = selectedDevice.reading;
   const u = settings.units;
   const ranges = rangesForDevice(selectedDevice);
@@ -111,8 +111,7 @@ export default function LiveView() {
   const [plantOpen, setPlantOpen] = useState(false);
 
   if (!selectedDevice.hasData) {
-    const connecting = selectedDevice.losantDeviceId && !pollReady;
-    return <DeviceWaiting device={selectedDevice} connecting={connecting} />;
+    return <DeviceWaiting device={selectedDevice} connecting={isConnecting(selectedDevice)} />;
   }
 
   return (

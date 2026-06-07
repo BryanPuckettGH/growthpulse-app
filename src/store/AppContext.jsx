@@ -101,9 +101,15 @@ export function AppProvider({ children }) {
     return base.map(buildDevice);
   });
   const [devicesReady, setDevicesReady] = useState(isDemo);
-  // Flips true after the first live poll returns, so a claimed device that
-  // hasn't reported yet reads "Connecting" on first load instead of "Offline".
-  const [pollReady, setPollReady] = useState(isDemo);
+  // When live polling began. A claimed device that hasn't reported yet reads
+  // "Connecting" for a grace window instead of "Offline", so a node that takes
+  // a few seconds to check in never flashes Offline on first load.
+  const pollStartedAtRef = useRef(Date.now());
+  const CONNECTING_GRACE_MS = 15000;
+  const isConnecting = useCallback(
+    (d) => !!(d && d.losantDeviceId && !d.hasData && Date.now() - pollStartedAtRef.current < CONNECTING_GRACE_MS),
+    []
+  );
   const [selectedDeviceId, setSelectedDeviceId] = useState(() => load('selectedDeviceId', null));
   const [alarmRules, setAlarmRules] = useState(() => load('alarmRules', DEFAULT_ALARMS));
   const [settings, setSettings] = useState(() => load('settings', { units: 'F', refreshMs: 2000, theme: 'auto' }));
@@ -206,7 +212,6 @@ export function AppProvider({ children }) {
         }
       }));
       if (cancelled) return;
-      setPollReady(true); // first poll has returned; cards can stop saying "Connecting"
       setDevices((ds) =>
         ds.map((d) => {
           if (d.losantDeviceId) {
@@ -237,6 +242,7 @@ export function AppProvider({ children }) {
         })
       );
     };
+    pollStartedAtRef.current = Date.now(); // start the "Connecting" grace window
     tick(); // poll once right away so we don't wait a full interval to show data
     const id = setInterval(tick, settings.refreshMs);
     return () => { cancelled = true; clearInterval(id); };
@@ -451,7 +457,7 @@ export function AppProvider({ children }) {
 
   const value = {
     user: { id: user.id, email: user.email, name: displayName, growerType: meta.grower_type || '' }, logout,
-    devices, devicesReady, pollReady, selectedDevice, selectedDeviceId, setSelectedDeviceId, addDevice, claimDevice, setDevicePlant, updateDevice, removeDevice, factoryResetDevice, setIrrigation, runPump, isDemo,
+    devices, devicesReady, isConnecting, selectedDevice, selectedDeviceId, setSelectedDeviceId, addDevice, claimDevice, setDevicePlant, updateDevice, removeDevice, factoryResetDevice, setIrrigation, runPump, isDemo,
     alarmRules, addAlarmRule, addAlarmRules, updateAlarmRule, removeAlarmRule,
     settings, updateSettings,
     tier: TIERS[tierId] || TIERS.free, tierId, setTier, showPlans, openPlans, closePlans,

@@ -14,7 +14,7 @@ import ImageCropper from '../components/ImageCropper';
 // List of all devices (tap to select) plus add/claim, gateways, and full
 // device management: rename, home location, delete, and factory reset.
 export default function DevicesView() {
-  const { devices, selectedDeviceId, setSelectedDeviceId, addDevice, claimDevice, tier, openPlans, isDemo, gateways, addGateway, removeGateway, pollReady } = useApp();
+  const { devices, selectedDeviceId, setSelectedDeviceId, addDevice, claimDevice, tier, openPlans, isDemo, gateways, addGateway, removeGateway, isConnecting } = useApp();
   const [open, setOpen] = useState(false);
   const [gwOpen, setGwOpen] = useState(false);
   const [editId, setEditId] = useState(null);
@@ -27,9 +27,9 @@ export default function DevicesView() {
 
   const card = (d) => {
     const t = TRANSPORTS[effectiveTransport(d)] || TRANSPORTS.wifi;
-    // Before the first poll comes back, a claimed device that hasn't reported
-    // yet is "Connecting", not "Offline" (don't scare people into refreshing).
-    const connecting = d.losantDeviceId && !d.hasData && !pollReady;
+    // For a grace window after load, a claimed device that hasn't reported yet
+    // is "Connecting", not "Offline" (don't scare people into refreshing).
+    const connecting = isConnecting(d);
     return (
       <div key={d.id} className={`device ${d.id === selectedDeviceId ? 'selected' : ''}`} onClick={() => setSelectedDeviceId(d.id)}>
         <DeviceAvatar device={d} fallbackColor={t.color} />
