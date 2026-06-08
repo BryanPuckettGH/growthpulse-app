@@ -348,6 +348,32 @@ input[type='range'].slider::-moz-range-thumb {
 .muted { color: var(--ink-3); font-size: 12.5px; line-height: 1.5; }
 .center { text-align: center; }
 
+/* ---------- Device switcher (app bar) ---------- */
+.devswitch__backdrop { position: fixed; inset: 0; z-index: 40; }
+.devswitch__menu {
+  position: absolute; top: 100%; left: 0; margin-top: 8px; z-index: 41;
+  background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+  box-shadow: 0 14px 34px rgba(16, 24, 40, 0.18); padding: 6px; min-width: 230px;
+  max-height: 64vh; overflow-y: auto; animation: slideUp 0.16s ease;
+}
+.devswitch__item {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px;
+  border: 0; background: none; border-radius: 10px; cursor: pointer; text-align: left;
+  color: var(--ink); font-family: inherit;
+}
+.devswitch__item:hover { background: var(--bg); }
+.devswitch__item.active { background: #eafaf0; }
+:root[data-theme='dark'] .devswitch__item.active { background: #11331f; }
+.devswitch__txt { flex: 1; min-width: 0; }
+.devswitch__name { font-weight: 700; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.devswitch__loc { font-size: 11.5px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.devswitch__manage {
+  width: 100%; margin-top: 4px; padding: 9px 10px; border: 0; border-top: 1px solid var(--line);
+  background: none; color: var(--green-d); font-weight: 700; font-size: 12.5px; cursor: pointer;
+  font-family: inherit; border-radius: 0 0 10px 10px;
+}
+.devswitch__manage:hover { background: var(--bg); }
+
 /* ---------- Report export sheet ---------- */
 .exp-ranges { display: flex; flex-wrap: wrap; gap: 8px; }
 .exp-range {

@@ -114,13 +114,13 @@ unsigned long lastPageSwitch = 0;
 // ============================================================
 String pairCode() {
   char b[8];
-  snprintf(b, sizeof(b), "%X", (uint32_t)(ESP.getEfuseMac() & 0xFFFFFF));
+  snprintf(b, sizeof(b), "%X", (uint32_t)((ESP.getEfuseMac() >> 24) & 0xFFFFFF));
   return String(b);
 }
 
 String apSsid() {
   char b[24];
-  snprintf(b, sizeof(b), "GrowthPulse-%06X", (uint32_t)(ESP.getEfuseMac() & 0xFFFFFF));
+  snprintf(b, sizeof(b), "GrowthPulse-%06X", (uint32_t)((ESP.getEfuseMac() >> 24) & 0xFFFFFF));
   return String(b);
 }
 

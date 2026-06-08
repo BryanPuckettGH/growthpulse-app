@@ -6,6 +6,9 @@ All notable changes to GrowthPulse, the web app and the device firmware.
 
 ## Web App
 
+### v2.13.0 — June 5, 2026
+- The plant name in the top bar is now a real dropdown: tap it to switch plants in place (with photos) without leaving the current view. Before, it jumped you to the Devices tab and you had to navigate back to Live.
+
 ### v2.12.2 — June 5, 2026
 - A device that's still checking in now shows "Connecting…" for up to 15 seconds instead of briefly flashing "Offline" before its first reading lands. Matches the few seconds a node needs to report after the page loads.
 

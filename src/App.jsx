@@ -10,9 +10,10 @@ import DevicesView from './views/DevicesView';
 import SettingsView from './views/SettingsView';
 import PlansSheet from './components/PlansSheet';
 import Onboarding from './components/Onboarding';
+import DeviceAvatar from './components/DeviceAvatar';
 import { activeAlerts, METRICS } from './store/helpers';
 import { openPlantReport } from './utils/report';
-import { Activity, LineChart, Bell, LayoutGrid, Settings, ChevronDown, FileText } from 'lucide-react';
+import { Activity, LineChart, Bell, LayoutGrid, Settings, ChevronDown, FileText, Check } from 'lucide-react';
 
 const TABS = [
   { id: 'live', label: 'Live', icon: Activity, View: LiveView },
@@ -41,8 +42,9 @@ function useTheme(theme) {
 }
 
 function Shell() {
-  const { user, selectedDevice, devices, devicesReady, alarmRules, settings, showPlans, closePlans, journals, weather } = useApp();
+  const { user, selectedDevice, selectedDeviceId, setSelectedDeviceId, devices, devicesReady, alarmRules, settings, showPlans, closePlans, journals, weather } = useApp();
   const [tab, setTab] = useState('live');
+  const [switcherOpen, setSwitcherOpen] = useState(false);
   const [toast, setToast] = useState(null);
   const prevKeys = useRef(new Set());
   const initialized = useRef(false);
@@ -87,11 +89,35 @@ function Shell() {
     <div className="shell">
       <div className="appbar">
         <img className="appbar__brand" src="/growthpulse-icon.svg" alt="" />
-        <div className="appbar__title">
-          <div className="appbar__name" onClick={() => setTab('devices')}>
-            {selectedDevice.name} <ChevronDown size={16} />
+        <div className="appbar__title" style={{ position: 'relative' }}>
+          <div className="appbar__name" onClick={() => devices.length > 1 ? setSwitcherOpen((v) => !v) : setTab('devices')}>
+            {selectedDevice.name} {devices.length > 1 && <ChevronDown size={16} />}
           </div>
           <div className="appbar__sub">{selectedDevice.location}</div>
+          {switcherOpen && (
+            <>
+              <div className="devswitch__backdrop" onClick={() => setSwitcherOpen(false)} />
+              <div className="devswitch__menu">
+                {devices.map((d) => (
+                  <button
+                    key={d.id}
+                    className={`devswitch__item ${d.id === selectedDeviceId ? 'active' : ''}`}
+                    onClick={() => { setSelectedDeviceId(d.id); setSwitcherOpen(false); }}
+                  >
+                    <DeviceAvatar device={d} size={30} radius={9} />
+                    <div className="devswitch__txt">
+                      <div className="devswitch__name">{d.name}</div>
+                      {d.location && <div className="devswitch__loc">{d.location}</div>}
+                    </div>
+                    {d.id === selectedDeviceId && <Check size={15} color="var(--green-d)" />}
+                  </button>
+                ))}
+                <button className="devswitch__manage" onClick={() => { setSwitcherOpen(false); setTab('devices'); }}>
+                  Manage devices
+                </button>
+              </div>
+            </>
+          )}
         </div>
         <button
           className="iconbtn"

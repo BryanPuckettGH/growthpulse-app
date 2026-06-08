@@ -39,7 +39,7 @@
 #define SOIL_PIN 2                // Soil on GPIO2 (GPIO1 is tied to battery-sense)
 #define RESET_BTN 0               // PRG button (GPIO0): hold 3s to redo Wi-Fi setup
 
-#define FW_VERSION "3.0"          // self-provisioning firmware (see CHANGELOG.md)
+#define FW_VERSION "3.1"          // self-provisioning + unique-per-chip pairing code
 #define WDT_TIMEOUT_S 60          // reboot if the firmware hangs this long
 #define DIM_AFTER_MS (5UL * 60UL * 1000UL)  // dim the OLED after 5 idle minutes
 #define SELFTEST_HOLD_MS 10000    // hold the sensor self-test on screen this long to read it
@@ -129,15 +129,22 @@ unsigned long lastPageSwitch = 0;
 // ============================================================
 // On-board OLED helpers
 // ============================================================
+// The pairing code must be UNIQUE per board. The efuse MAC's low 24 bits are
+// the manufacturer OUI (identical across Espressif chips), so we use the HIGH
+// 24 bits, the per-chip NIC id, which differs on every board.
+uint32_t chipUid() {
+  return (uint32_t)((ESP.getEfuseMac() >> 24) & 0xFFFFFF);
+}
+
 String pairCode() {
   char b[8];
-  snprintf(b, sizeof(b), "%X", (uint32_t)(ESP.getEfuseMac() & 0xFFFFFF));
+  snprintf(b, sizeof(b), "%06X", chipUid());
   return String(b);
 }
 
 String apSsid() {
   char b[24];
-  snprintf(b, sizeof(b), "GrowthPulse-%06X", (uint32_t)(ESP.getEfuseMac() & 0xFFFFFF));
+  snprintf(b, sizeof(b), "GrowthPulse-%06X", chipUid());
   return String(b);
 }
 
