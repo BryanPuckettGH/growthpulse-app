@@ -117,6 +117,9 @@ All notable changes to GrowthPulse, the web app and the device firmware.
 
 ## Device Firmware (GP_Provisioning)
 
+### v3.0 — June 5, 2026 (GP_Node, self-provisioning)
+- New `GP_Node` firmware: one identical image for every board, NO per-board secrets. On first boot a board registers itself (sends its pairing code + a shared token to the `provision-device` endpoint), receives its own Losant device + access key, and saves them to flash. Flash any number of boards; each appears in the app as its own plant. This is the "mail a customer a board" path. The previous `GP_Provisioning` v2.3 (hard-coded identity) remains for reference.
+
 ### v2.3 — June 5, 2026
 - Boot sensor self-test now holds on screen for 10 seconds so it's readable.
 - Reports Wi-Fi signal strength (`wifiRssi`) in telemetry so the app can show the node's real connection instead of a user-set label.
