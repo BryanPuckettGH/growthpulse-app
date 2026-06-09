@@ -1,5 +1,5 @@
 /* ============================================================
-   GrowthPulse Node Firmware  (SELF-PROVISIONING)
+   GrowthPulse Node Firmware  v3.5  (SELF-PROVISIONING)
    ------------------------------------------------------------
    Board: Heltec WiFi LoRa 32 V3 (ESP32-S3)
    Wiring: DS18B20 -> GPIO4, DHT22 -> GPIO5, Soil AO -> GPIO2 (5V)
@@ -39,7 +39,7 @@
 #define SOIL_PIN 2                // Soil on GPIO2 (GPIO1 is tied to battery-sense)
 #define RESET_BTN 0               // PRG button (GPIO0): hold 3s to redo Wi-Fi setup
 
-#define FW_VERSION "3.1"          // self-provisioning + unique-per-chip pairing code
+#define FW_VERSION "3.5"          // self-provisioning + unique-per-chip pairing code
 #define WDT_TIMEOUT_S 60          // reboot if the firmware hangs this long
 #define DIM_AFTER_MS (5UL * 60UL * 1000UL)  // dim the OLED after 5 idle minutes
 #define SELFTEST_HOLD_MS 10000    // hold the sensor self-test on screen this long to read it
@@ -50,6 +50,23 @@
 #define LINK_LABEL "Wi-Fi"
 #define PAGE_MS 5000              // cycle the status screen every ~5 seconds
 #define PAGE_COUNT 3             // pair code -> connection -> live readings
+
+// ----------------- Battery (Heltec V3) -----------------
+// The V3 senses battery voltage on GPIO1 through a divider gated by GPIO37.
+// GPIO1 is free here because the soil sensor lives on GPIO2. The /238.7 factor
+// and the discharge curve are the community-calibrated values from the
+// ropg/heltec_esp32_lora_v3 library (a naive voltage->% is quite inaccurate).
+#define VBAT_CTRL 37
+#define VBAT_ADC  1
+static const float BAT_MIN_V = 3.04, BAT_MAX_V = 4.26;
+static const uint8_t BAT_CURVE[100] = {
+  254,242,230,227,223,219,215,213,210,207, 206,202,202,200,200,199,198,198,196,196,
+  195,195,194,192,191,188,187,185,185,185, 183,182,180,179,178,175,175,174,172,171,
+  170,169,168,166,166,165,165,164,161,161, 159,158,158,157,156,155,151,148,147,145,
+  143,142,140,140,136,132,130,130,129,126, 125,124,121,120,118,116,115,114,112,112,
+  110,110,108,106,106,104,102,101, 99, 97,  94, 90, 81, 80, 76, 73, 66, 52, 32,  7,
+};
+int batteryPct = -1;   // -1 until first read
 
 // ----------------- On-board OLED (Heltec V3) -----------------
 #define VEXT_PIN 36
@@ -148,6 +165,25 @@ String apSsid() {
   return String(b);
 }
 
+// Battery percent from the V3's calibrated discharge curve. Returns -1 when no
+// real battery is on the V3's dedicated LiPo connector (e.g. USB-powered), so
+// the app shows "AC power" instead of a false "Battery 0%".
+int readBatteryPercent() {
+  pinMode(VBAT_CTRL, OUTPUT);
+  digitalWrite(VBAT_CTRL, LOW);   // connect the divider
+  delay(5);
+  int raw = analogRead(VBAT_ADC);
+  pinMode(VBAT_CTRL, INPUT);      // release (it's pulled up) to save power
+  float v = raw / 238.7f;         // Heltec V3 calibration -> volts
+  Serial.printf("Battery: adc=%d  vbat=%.2fV\n", raw, v);   // diagnostic
+  if (v < 2.5f) return -1;        // implausibly low = no battery on the connector
+  float step = (BAT_MAX_V - BAT_MIN_V) / 256.0f;
+  for (int n = 0; n < 100; n++) {
+    if (v > BAT_MIN_V + step * BAT_CURVE[n]) return 100 - n;
+  }
+  return 0;
+}
+
 void oledInit() {
   pinMode(VEXT_PIN, OUTPUT);
   digitalWrite(VEXT_PIN, LOW);
@@ -214,7 +250,7 @@ void pagePairCode(bool online) {
   oled.sendBuffer();
 }
 
-// Page 1: how it's connected, what its signal is, and its address.
+// Page 1: how it's connected, signal, address, and battery level.
 void pageConnection(bool online) {
   oled.clearBuffer();
   pageHeader("CONNECTION", online);
@@ -226,11 +262,13 @@ void pageConnection(bool online) {
     snprintf(val, sizeof(val), "%ld dBm", (long)WiFi.RSSI());
     oled.drawStr(2, 41, "Signal");
     drawRight(126, 41, val);
-    oled.drawStr(2, 54, "IP");
-    drawRight(126, 54, WiFi.localIP().toString().c_str());
   } else {
-    oled.drawStr(2, 44, "Connecting...");
+    oled.drawStr(2, 41, "Connecting...");
   }
+  oled.drawStr(2, 54, "Battery");
+  if (batteryPct >= 0) snprintf(val, sizeof(val), "%d%%", batteryPct);
+  else snprintf(val, sizeof(val), "AC/USB");   // no battery on the sense connector
+  drawRight(126, 54, val);
   oled.sendBuffer();
 }
 
@@ -306,8 +344,10 @@ void bootSelfTest() {
   }
   bool air = !isnan(at);
 
-  int raw = analogRead(SOIL_PIN);
-  bool moist = raw > 300;                            // floating probe reads near 0
+  long rsum = 0; int rmn = 4095, rmx = 0;            // sample to judge connected vs floating
+  for (int i = 0; i < 8; i++) { int r = analogRead(SOIL_PIN); rsum += r; if (r < rmn) rmn = r; if (r > rmx) rmx = r; delay(5); }
+  int raw = rsum / 8;
+  bool moist = (raw > 300) && ((rmx - rmn) < 600);    // present AND steady = really connected
 
   oled.clearBuffer();
   oled.setFont(u8g2_font_6x12_tr);
@@ -337,6 +377,11 @@ void connectWiFi() {
   // (setPreloadWiFiScan needs a newer WiFiManager release; skipped here.)
   wm.setWiFiAutoReconnect(false);  // stop background retries from yanking the radio off-channel
   WiFi.setSleep(false);            // keep the AP responsive to the phone
+  // If the board still holds credentials for a network it can't reach (e.g. a
+  // reused unit, or after a move), don't wait forever on that, give up after
+  // 15s and open the setup hotspot. A returning unit on its real network still
+  // reconnects well within this.
+  wm.setConnectTimeout(15);
   wm.setCustomHeadElement(GP_HEAD);
   WiFiManagerParameter gpBranding(GP_BRANDING);
   wm.addParameter(&gpBranding);
@@ -540,14 +585,21 @@ void readSensors() {
   airTemperatureF = dht.readTemperature(true);
   airHumidity = dht.readHumidity();
 
-  long sum = 0;
+  long sum = 0; int mn = 4095, mx = 0;
   for (int i = 0; i < 10; i++) {
-    sum += analogRead(SOIL_PIN);
+    int r = analogRead(SOIL_PIN);
+    sum += r; if (r < mn) mn = r; if (r > mx) mx = r;
     delay(10);
   }
   soilRaw = sum / 10;
+  // A real powered probe gives steady readings; an unplugged/floating pin is
+  // noisy (large spread) and also drifts low. Treat either as disconnected so
+  // the app shows "not connected" instead of a fake number.
+  if ((mx - mn) > 600 || soilRaw < 300) soilRaw = 0;
   soilMoisturePercent = map(soilRaw, dryValue, wetValue, 0, 100);
   soilMoisturePercent = constrain(soilMoisturePercent, 0, 100);
+
+  batteryPct = readBatteryPercent();
 }
 
 // ============================================================
@@ -565,6 +617,7 @@ void sendTelemetry() {
   // connected (Wi-Fi + signal), not a label the user picked. A LoRaWAN build
   // would omit this, letting the app fall back to showing LoRaWAN.
   root["wifiRssi"] = WiFi.RSSI();
+  root["batteryPct"] = batteryPct;   // app shows the battery badge from this
   device->sendState(root);
 
   Serial.print("Sent  moisture=");

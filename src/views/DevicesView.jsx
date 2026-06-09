@@ -43,6 +43,7 @@ export default function DevicesView() {
               {d.online ? 'Online' : connecting ? 'Connecting…' : d.hasData ? `Offline · ${timeAgo(d.lastSeen)}` : 'Offline'}
             </span>
             {d.location && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><MapPin size={11} />{d.location}</span>}
+            {d.pairingCode && <span className="device__code">#{d.pairingCode}</span>}
           </div>
         </div>
         <div className="device__reading">

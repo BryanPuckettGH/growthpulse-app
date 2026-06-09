@@ -83,6 +83,7 @@ function rowToDevice(r) {
     irrigation: r.irrigation || undefined,
     photo: r.photo || undefined,
     losantDeviceId: r.losant_device_id,
+    pairingCode: r.claim_code || undefined,   // shown on the device card so units are never confused
     // When the plant joined this account; the report's "Everything" range
     // and the activity timeline both start here.
     claimedAt: r.created_at ? new Date(r.created_at).getTime() : 0,

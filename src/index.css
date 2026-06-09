@@ -348,6 +348,9 @@ input[type='range'].slider::-moz-range-thumb {
 .muted { color: var(--ink-3); font-size: 12.5px; line-height: 1.5; }
 .center { text-align: center; }
 
+/* device pairing code chip (so you never confuse units) */
+.device__code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 700; letter-spacing: 0.5px; color: var(--ink-3); }
+
 /* ---------- Device switcher (app bar) ---------- */
 .devswitch__backdrop { position: fixed; inset: 0; z-index: 40; }
 .devswitch__menu {
