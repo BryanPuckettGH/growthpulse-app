@@ -6,6 +6,9 @@ All notable changes to GrowthPulse, the web app and the device firmware.
 
 ## Web App
 
+### v2.15.0 — June 5, 2026
+- Device cards now respect the disconnected-sensor check for moisture: a card whose probe isn't connected shows "—" / "no probe" instead of a misleading 100%.
+
 ### v2.14.0 — June 5, 2026
 - Device cards now show each unit's pairing code (e.g. #B0713A), so you can always tell units apart even if you forget what you named them.
 

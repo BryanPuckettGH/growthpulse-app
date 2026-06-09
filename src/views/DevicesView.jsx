@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useApp } from '../store/AppContext';
-import { TRANSPORTS, timeAgo, effectiveTransport } from '../store/helpers';
+import { TRANSPORTS, timeAgo, effectiveTransport, metricConnected } from '../store/helpers';
 import { TransportIcon, PowerBadge } from '../components/UI';
 import { geocodePlace } from '../utils/geocode';
 import { fileToThumb } from '../utils/image';
@@ -47,8 +47,12 @@ export default function DevicesView() {
           </div>
         </div>
         <div className="device__reading">
-          <div className="device__big">{d.hasData ? `${d.reading.soilMoisturePercent}%` : '—'}</div>
-          <div className="device__small">{d.hasData ? 'moisture' : connecting ? 'connecting' : 'offline'}</div>
+          <div className="device__big">
+            {d.hasData ? (metricConnected('soilMoisturePercent', d.reading) ? `${d.reading.soilMoisturePercent}%` : '—') : '—'}
+          </div>
+          <div className="device__small">
+            {!d.hasData ? (connecting ? 'connecting' : 'offline') : metricConnected('soilMoisturePercent', d.reading) ? 'moisture' : 'no probe'}
+          </div>
         </div>
         <button className="device__edit" onClick={(e) => { e.stopPropagation(); setEditId(d.id); }} aria-label="Edit device"><Pencil size={16} /></button>
       </div>

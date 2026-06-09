@@ -1,5 +1,5 @@
 /* ============================================================
-   GrowthPulse Node Firmware  v3.5  (SELF-PROVISIONING)
+   GrowthPulse Node Firmware  v3.6  (SELF-PROVISIONING)
    ------------------------------------------------------------
    Board: Heltec WiFi LoRa 32 V3 (ESP32-S3)
    Wiring: DS18B20 -> GPIO4, DHT22 -> GPIO5, Soil AO -> GPIO2 (5V)
@@ -39,7 +39,7 @@
 #define SOIL_PIN 2                // Soil on GPIO2 (GPIO1 is tied to battery-sense)
 #define RESET_BTN 0               // PRG button (GPIO0): hold 3s to redo Wi-Fi setup
 
-#define FW_VERSION "3.5"          // self-provisioning + unique-per-chip pairing code
+#define FW_VERSION "3.6"          // self-provisioning + unique-per-chip pairing code
 #define WDT_TIMEOUT_S 60          // reboot if the firmware hangs this long
 #define DIM_AFTER_MS (5UL * 60UL * 1000UL)  // dim the OLED after 5 idle minutes
 #define SELFTEST_HOLD_MS 10000    // hold the sensor self-test on screen this long to read it
@@ -596,8 +596,8 @@ void readSensors() {
   // noisy (large spread) and also drifts low. Treat either as disconnected so
   // the app shows "not connected" instead of a fake number.
   if ((mx - mn) > 600 || soilRaw < 300) soilRaw = 0;
-  soilMoisturePercent = map(soilRaw, dryValue, wetValue, 0, 100);
-  soilMoisturePercent = constrain(soilMoisturePercent, 0, 100);
+  // raw 0 means disconnected; report 0% (not the 100% that map() would give for 0).
+  soilMoisturePercent = (soilRaw == 0) ? 0 : constrain(map(soilRaw, dryValue, wetValue, 0, 100), 0, 100);
 
   batteryPct = readBatteryPercent();
 }
