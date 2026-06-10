@@ -6,6 +6,11 @@ All notable changes to GrowthPulse, the web app and the device firmware.
 
 ## Web App
 
+### v2.19.0 — June 10, 2026
+- Automated LoRaWAN provisioning, the LoRaWAN twin of Wi-Fi self-provisioning. Switching a device to LoRaWAN in the app now sets the board up automatically: the new `provision-lorawan` function generates fresh OTAA keys, creates a unique end-device on The Things Stack (the 4-call IS/JS/NS/AS API), routes it to the board's existing Losant identity, and pushes the keys to the board (online over Wi-Fi), which reboots into LoRaWAN and joins. No console, no hand-pasted keys. Each switch mints its own DevEUI, so a teammate's board is flash-and-go on LoRaWAN.
+- Dynamic routing: the uplink webhook now resolves the target Losant device from the Supabase `lorawan_devices` table (written at provision time) instead of a hand-edited env map. New migration `docs/growthpulse-lorawan-routes-schema.sql`.
+- Combined firmware gained a `provisionLoRa` command (receives pushed keys, saves to flash, switches to LoRaWAN). Setup + env vars in `docs/GrowthPulse LoRaWAN Auto-Provision Setup.md` (needs `TTS_API_KEY`, `TTS_APP_ID`).
+
 ### v2.18.0 — June 10, 2026
 - Auto-register gateways on The Things Stack: adding or scanning a gateway in the app now registers it on your TTS network and ties it to the account automatically, the customer never touches The Things Stack. New `register-gateway` serverless function (validates the signed-in user, creates the gateway via the TTS API). Setup in `docs/GrowthPulse Gateway Auto-Register Setup.md` (needs `TTS_API_KEY`, `TTS_USER_ID` env vars). The gateway hardware still ships pre-pointed at your TTS server.
 - New combined node firmware (`firmware/GP_Combined`): one identical image runs either Wi-Fi or LoRaWAN, chosen by a saved flag. Wi-Fi units self-provision and do the saved-Wi-Fi-then-hotspot flow; LoRaWAN units load OTAA keys from flash and join any gateway. The OLED shows the live path and signal (Wi-Fi dBm or LoRa RSSI). Switch modes from the setup portal, the app (`setMode` command), or a downlink. No per-board secrets in the image.

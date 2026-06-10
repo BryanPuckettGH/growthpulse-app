@@ -112,6 +112,7 @@ float battVSmooth = -1;
 #define OLED_SCL 18
 #define OLED_RST 21
 U8G2_SSD1306_128X64_NONAME_F_HW_I2C oled(U8G2_R0, OLED_RST, OLED_SCL, OLED_SDA);
+void oledMessage(const char* l1, const char* l2);   // forward decl (used before its definition below)
 
 // ----------------- Soil calibration -----------------
 int dryValue = 3600;
@@ -247,6 +248,15 @@ void saveLoRaKeys(uint64_t joinEUI, uint64_t devEUI, const uint8_t appKey[16]) {
   nvs.putBytes("lwDevEUI", &devEUI, sizeof(devEUI));
   nvs.putBytes("lwAppKey", appKey, 16);
   nvs.end();
+}
+
+// Parse a hex string ("0A1B...") into `n` bytes. Used by the provisionLoRa
+// command to unpack the AppKey the backend pushes down.
+void hexToBytes(const char* hexStr, uint8_t* out, size_t n) {
+  for (size_t i = 0; i < n; i++) {
+    char b[3] = { hexStr[i * 2], hexStr[i * 2 + 1], 0 };
+    out[i] = (uint8_t)strtoul(b, nullptr, 16);
+  }
 }
 
 // ============================================================
@@ -513,9 +523,29 @@ void handleCommand(LosantCommand *command) {
     WiFiManager wm; wm.resetSettings();
     delay(400); ESP.restart();
   } else if (strcmp(command->name, "setMode") == 0) {
-    // Payload { "mode": "lorawan" | "wifi" }
-    const char* m = command->payload["mode"];
+    // Payload { "mode": "lorawan" | "wifi" } (payload is a JsonObject*)
+    const char* m = (*command->payload)["mode"].as<const char*>();
     if (m) setModeAndReboot(String(m));
+  } else if (strcmp(command->name, "provisionLoRa") == 0) {
+    // The backend auto-provisioned a TTS device and pushed its OTAA keys here:
+    //   { joinEUI: "16hex", devEUI: "16hex", appKey: "32hex" }
+    // Save them to flash and reboot into LoRaWAN, where they're loaded from NVS.
+    JsonObject p = *command->payload;
+    const char* je = p["joinEUI"].as<const char*>();
+    const char* de = p["devEUI"].as<const char*>();
+    const char* ak = p["appKey"].as<const char*>();
+    if (de && ak && strlen(de) == 16 && strlen(ak) == 32) {
+      uint64_t joinEUI = je ? strtoull(je, nullptr, 16) : 0ULL;
+      uint64_t devEUI  = strtoull(de, nullptr, 16);
+      uint8_t appKey[16];
+      hexToBytes(ak, appKey, 16);
+      saveLoRaKeys(joinEUI, devEUI, appKey);
+      oledMessage("LoRaWAN keys set", "switching over...");
+      delay(900);
+      setModeAndReboot("lorawan");
+    } else {
+      Serial.println("provisionLoRa: bad/short keys, ignoring.");
+    }
   }
 }
 

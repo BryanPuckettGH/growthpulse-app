@@ -393,6 +393,33 @@ export function AppProvider({ children }) {
     setDevices((ds) => ds.map((d) => (d.id === id ? { ...d, ...patch } : d)));
     syncDevice(id, patch);
   }, [syncDevice]);
+
+  // Auto-provision this board for LoRaWAN: the backend mints a TTS device with
+  // fresh OTAA keys, routes it to this board's Losant identity, and pushes the
+  // keys to the board (online over Wi-Fi), which reboots into LoRaWAN and joins.
+  // Returns null on success, or an error string. The board needs combined
+  // firmware (v4+) and must be online to receive the keys.
+  const provisionLoRaWAN = useCallback(async (id) => {
+    const d = devicesRef.current.find((x) => x.id === id);
+    if (!d || !d.losantDeviceId) return 'This device has no cloud identity yet.';
+    if (!supabase) return 'Accounts service unavailable.';
+    const { data: sess } = await supabase.auth.getSession();
+    if (!sess || !sess.session) return 'Please sign in again.';
+    try {
+      const res = await fetch('/.netlify/functions/provision-lorawan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sess.session.access_token}` },
+        body: JSON.stringify({ losantDeviceId: d.losantDeviceId }),
+      });
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        return e.error || 'LoRaWAN provisioning failed.';
+      }
+      return null;
+    } catch {
+      return 'Could not reach the provisioning service.';
+    }
+  }, []);
   // Removing a device also purges everything tied to it (journal, photos,
   // device-specific alarms) so a resold unit leaves nothing behind.
   const removeDevice = useCallback((id) => {
@@ -524,7 +551,7 @@ export function AppProvider({ children }) {
 
   const value = {
     user: { id: user.id, email: user.email, name: displayName, growerType: meta.grower_type || '' }, logout,
-    devices, devicesReady, isConnecting, selectedDevice, selectedDeviceId, setSelectedDeviceId, addDevice, claimDevice, setDevicePlant, updateDevice, removeDevice, factoryResetDevice, setIrrigation, runPump, isDemo,
+    devices, devicesReady, isConnecting, selectedDevice, selectedDeviceId, setSelectedDeviceId, addDevice, claimDevice, setDevicePlant, updateDevice, removeDevice, factoryResetDevice, provisionLoRaWAN, setIrrigation, runPump, isDemo,
     alarmRules, addAlarmRule, addAlarmRules, updateAlarmRule, removeAlarmRule,
     settings, updateSettings,
     tier: TIERS[tierId] || TIERS.free, tierId, setTier, showPlans, openPlans, closePlans,

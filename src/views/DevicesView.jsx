@@ -188,7 +188,7 @@ function GatewaySheet({ onClose, onAdd }) {
 }
 
 function DeviceEditSheet({ device, onClose }) {
-  const { updateDevice, removeDevice, factoryResetDevice, devices } = useApp();
+  const { updateDevice, removeDevice, factoryResetDevice, provisionLoRaWAN, devices } = useApp();
   const [name, setName] = useState(device.name);
   const [location, setLocation] = useState(device.location);
   const [transport, setTransport] = useState(device.transport);
@@ -197,6 +197,7 @@ function DeviceEditSheet({ device, onClose }) {
   const [cropSrc, setCropSrc] = useState(null); // image awaiting crop
   const groupSuggestions = [...new Set(devices.map((x) => x.group).filter(Boolean))];
   const [busy, setBusy] = useState(false);
+  const [lwMsg, setLwMsg] = useState(''); // LoRaWAN provisioning feedback
   const [confirm, setConfirm] = useState(null); // null | 'remove' | 'reset'
 
   const onPickPhoto = async (e) => {
@@ -209,6 +210,7 @@ function DeviceEditSheet({ device, onClose }) {
 
   const save = async () => {
     setBusy(true);
+    setLwMsg('');
     let patch = { name: name.trim() || device.name, transport, group: group.trim() || undefined };
     if (photo !== (device.photo || null)) patch.photo = photo || null;
     const loc = location.trim();
@@ -220,9 +222,23 @@ function DeviceEditSheet({ device, onClose }) {
       patch = { ...patch, location: '', geo: undefined };
     }
     updateDevice(device.id, patch);
+    // Switching a real, online node to LoRaWAN actually provisions it: the
+    // backend mints a TTS device + keys and pushes them to the board, which
+    // reboots and joins. Keep the sheet open to report the result.
+    if (transport === 'lorawan' && device.transport !== 'lorawan' && !isDemoDevice(device)) {
+      setLwMsg('Setting up LoRaWAN… the node will switch over in about a minute.');
+      const err = await provisionLoRaWAN(device.id);
+      if (err) { setLwMsg('LoRaWAN setup failed: ' + err); setBusy(false); return; }
+      setLwMsg('LoRaWAN keys sent. The node is switching over now.');
+      setBusy(false);
+      setTimeout(onClose, 1800);
+      return;
+    }
     setBusy(false);
     onClose();
   };
+  // A claimed real device has a cloud id; demo devices don't get provisioned.
+  function isDemoDevice(d) { return !d.losantDeviceId; }
 
   const destroy = async () => {
     if (confirm === 'reset') {
@@ -311,9 +327,9 @@ function DeviceEditSheet({ device, onClose }) {
         </div>
         {transport === 'lorawan' && (
           <p className="muted" style={{ fontSize: 12, margin: '-4px 2px 10px' }}>
-            Takes effect the next time the node powers on. The node joins through your LoRaWAN gateway, no
-            Wi-Fi needed, and reports every few minutes to save battery. Make sure your gateway is added below
-            and registered with your network server.
+            Saving sets this node up for LoRaWAN automatically: it gets its own keys and switches over the air
+            (the node must be online and on v4+ firmware). It then joins through any gateway in range, no Wi-Fi
+            needed, and reports every few minutes to save battery.
           </p>
         )}
         {transport === 'wifi' && transport !== device.transport && (
@@ -321,7 +337,10 @@ function DeviceEditSheet({ device, onClose }) {
             Takes effect the next time the node powers on. Wi-Fi runs the usual phone setup and updates every few seconds.
           </p>
         )}
-        <button className="btn btn--green" disabled={busy} onClick={save}>{busy ? 'Saving...' : 'Save changes'}</button>
+        <button className="btn btn--green" disabled={busy} onClick={save}>
+          {busy ? (transport === 'lorawan' && device.transport !== 'lorawan' ? 'Setting up LoRaWAN…' : 'Saving...') : 'Save changes'}
+        </button>
+        {lwMsg && <p className="muted" style={{ fontSize: 12, margin: '8px 2px 0' }}>{lwMsg}</p>}
 
         <div className="danger">
           <div className="fieldlabel" style={{ color: 'var(--red)' }}>Danger zone</div>

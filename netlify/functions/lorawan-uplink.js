@@ -51,11 +51,23 @@ export const handler = async (event) => {
     return { statusCode: 422, body: JSON.stringify({ error: 'No decoded_payload (add the TTS uplink formatter)' }) };
   }
 
-  // Resolve which Losant device this TTS device maps to.
+  // Resolve which Losant device this TTS device maps to: static env map first,
+  // then the Supabase route table (auto-provisioned devices), then a default.
   const ttsDeviceId = ids.device_id || '';
   let map = {};
   try { map = JSON.parse(process.env.LORAWAN_DEVICE_MAP || '{}'); } catch { map = {}; }
-  const losantDeviceId = map[ttsDeviceId] || process.env.LORAWAN_DEFAULT_DEVICE_ID || '';
+  let losantDeviceId = map[ttsDeviceId] || '';
+  if (!losantDeviceId && process.env.VITE_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY && ttsDeviceId) {
+    try {
+      const q = `${process.env.VITE_SUPABASE_URL}/rest/v1/lorawan_devices?tts_device_id=eq.${encodeURIComponent(ttsDeviceId)}&select=losant_device_id`;
+      const lookup = await fetch(q, { headers: { apikey: process.env.SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}` } });
+      if (lookup.ok) {
+        const rows = await lookup.json();
+        if (Array.isArray(rows) && rows[0] && rows[0].losant_device_id) losantDeviceId = rows[0].losant_device_id;
+      }
+    } catch { /* fall through to the default below */ }
+  }
+  if (!losantDeviceId) losantDeviceId = process.env.LORAWAN_DEFAULT_DEVICE_ID || '';
   if (!losantDeviceId) {
     return { statusCode: 404, body: JSON.stringify({ error: `No Losant mapping for TTS device "${ttsDeviceId}"` }) };
   }
