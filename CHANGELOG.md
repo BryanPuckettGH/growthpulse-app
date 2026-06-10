@@ -6,6 +6,10 @@ All notable changes to GrowthPulse, the web app and the device firmware.
 
 ## Web App
 
+### v2.18.0 — June 10, 2026
+- Auto-register gateways on The Things Stack: adding or scanning a gateway in the app now registers it on your TTS network and ties it to the account automatically, the customer never touches The Things Stack. New `register-gateway` serverless function (validates the signed-in user, creates the gateway via the TTS API). Setup in `docs/GrowthPulse Gateway Auto-Register Setup.md` (needs `TTS_API_KEY`, `TTS_USER_ID` env vars). The gateway hardware still ships pre-pointed at your TTS server.
+- New combined node firmware (`firmware/GP_Combined`): one identical image runs either Wi-Fi or LoRaWAN, chosen by a saved flag. Wi-Fi units self-provision and do the saved-Wi-Fi-then-hotspot flow; LoRaWAN units load OTAA keys from flash and join any gateway. The OLED shows the live path and signal (Wi-Fi dBm or LoRa RSSI). Switch modes from the setup portal, the app (`setMode` command), or a downlink. No per-board secrets in the image.
+
 ### v2.17.0 — June 9, 2026
 - LoRaWAN is now real, not "in development." The app shows a node's true link from its telemetry: a Wi-Fi build reports Wi-Fi, a LoRaWAN build (that joins through your gateway) shows as LoRaWAN. Removed the interim code that forced every node to display Wi-Fi, and removed the "still in development" notes.
 - Live LoRa signal: the connection badge now shows real link quality, Wi-Fi RSSI for Wi-Fi nodes, and RSSI plus SNR for LoRaWAN nodes, on the dashboard and device cards. The `device-state` and uplink pipeline now carry `loraRssi`, `loraSnr`, and the transport tag end to end.

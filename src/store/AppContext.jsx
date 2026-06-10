@@ -462,6 +462,18 @@ export function AppProvider({ children }) {
       // Persist on the account so the gateway follows the user everywhere.
       const { data: ins } = await supabase.from('gateways').insert({ name: gw.name, eui: gw.code }).select().single();
       if (ins) setGateways((gs) => gs.map((g) => (g.id === gw.id ? { ...g, id: ins.id } : g)));
+      // Auto-register the gateway on The Things Stack so the customer never has
+      // to touch TTS. Best-effort: the gateway is still saved if this fails.
+      try {
+        const { data: sess } = await supabase.auth.getSession();
+        if (sess && sess.session) {
+          await fetch('/.netlify/functions/register-gateway', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sess.session.access_token}` },
+            body: JSON.stringify({ eui: gw.code, name: gw.name }),
+          });
+        }
+      } catch { /* gateway is saved; TTS auto-registration is best-effort */ }
     }
   }, [isDemo]);
   const removeGateway = useCallback((id) => {
