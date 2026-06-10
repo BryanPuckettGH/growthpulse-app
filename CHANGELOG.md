@@ -6,6 +6,9 @@ All notable changes to GrowthPulse, the web app and the device firmware.
 
 ## Web App
 
+### v2.16.0 — June 9, 2026
+- Your plan now sticks. The subscription tier (Free / Plus / Pro) is saved on your account instead of only in the browser, so it follows you across logins and devices. Before, a fresh login defaulted back to Free and you had to "upgrade" again every time.
+
 ### v2.15.0 — June 5, 2026
 - Device cards now respect the disconnected-sensor check for moisture: a card whose probe isn't connected shows "—" / "no probe" instead of a misleading 100%.
 
@@ -125,6 +128,23 @@ All notable changes to GrowthPulse, the web app and the device firmware.
 ---
 
 ## Device Firmware (GP_Provisioning)
+
+### v3.11 — June 9, 2026 (GP_Node)
+- Optional true USB-vs-battery detection. Add a 100k/100k divider from the board's 5V pin to GND with the midpoint on GPIO7, then set `USE_VBUS_SENSE` to 1 and reflash. The firmware then reads a real "plugged in" signal (midpoint ~2.5V on USB, 0V on battery) instead of guessing from voltage: plugged shows AC/Charging, on battery shows the real percent, and the no-battery-on-USB phantom is gone. Default is off, so boards without the wire keep the voltage-only behavior unchanged.
+
+### v3.10 — June 9, 2026 (GP_Node)
+- No-battery-on-USB now reads as AC, not a phantom percent. With no battery installed, the charge chip holds the sense line near a full pack's voltage (the board has no battery-detect pin). When that line sits pinned at the top and is no longer rising, the unit now reports AC power instead of a misleading climbing percent. Running on a real battery is unaffected; a pack mid-charge still shows "Charging".
+- Sleep label: the power-off screen now reads "Sleeping" (it is deep sleep, ~microamps, not a true zero-power off, which the board can't do without a hardware switch).
+
+### v3.9 — June 9, 2026 (GP_Node)
+- Power button: the unit can now be turned off without unplugging. Double-tap the PRG button and it drops into deep sleep (~microamps, screen off, no telemetry, months on a charge). A single PRG press wakes it back up (RESET works too); it reboots, reloads its saved Wi-Fi and cloud identity, and reconnects on its own. Waking from sleep no longer triggers the boot-time Wi-Fi wipe.
+
+### v3.8 — June 9, 2026 (GP_Node)
+- Battery percent no longer jumps when you plug in. A charger inflates the pack's measured voltage the instant it connects (a 44% pack reads ~65%), so the shown percent now creeps at most 1% per reading: it only rises while charging and eases back toward the true level on battery. No more 44 to 65 leap.
+
+### v3.7 — June 9, 2026 (GP_Node)
+- Battery reading fixed: this board's battery-sense control pin (GPIO37) is inverted from the documented Heltec wiring. It now drives the divider with the correct polarity and averages 16 samples, so the OLED and app show a real percent instead of "AC/USB" 0%.
+- Charging indicator: the node infers charge state from the battery voltage (the V3 exposes no charge-status pin) and reports it. The OLED shows "Charging +" and the app's power badge shows a charging bolt while the pack is taking current or sitting at the charger's top voltage.
 
 ### v3.0 — June 5, 2026 (GP_Node, self-provisioning)
 - New `GP_Node` firmware: one identical image for every board, NO per-board secrets. On first boot a board registers itself (sends its pairing code + a shared token to the `provision-device` endpoint), receives its own Losant device + access key, and saves them to flash. Flash any number of boards; each appears in the app as its own plant. This is the "mail a customer a board" path. The previous `GP_Provisioning` v2.3 (hard-coded identity) remains for reference.

@@ -1,5 +1,5 @@
 /* ============================================================
-   GrowthPulse Node Firmware  v3.6  (SELF-PROVISIONING)
+   GrowthPulse Node Firmware  v3.11  (SELF-PROVISIONING)
    ------------------------------------------------------------
    Board: Heltec WiFi LoRa 32 V3 (ESP32-S3)
    Wiring: DS18B20 -> GPIO4, DHT22 -> GPIO5, Soil AO -> GPIO2 (5V)
@@ -16,6 +16,9 @@
 
    Reset Wi-Fi any time: hold PRG for 3 seconds (no RST needed),
    hold PRG while powering on, OR factory-reset from the app.
+
+   Power button (PRG): double-tap to turn OFF (deep sleep, ~uA);
+   a single PRG press (or RESET) turns it back ON.
    ============================================================ */
 
 #include <WiFi.h>
@@ -31,6 +34,7 @@
 #include <Wire.h>
 #include <U8g2lib.h>
 #include <esp_task_wdt.h>        // hardware watchdog: auto-reboot on a hang
+#include <esp_sleep.h>           // deep-sleep "power off" + wake on the PRG button
 
 // ----------------- Pins -----------------
 #define ONE_WIRE_BUS 4
@@ -39,7 +43,7 @@
 #define SOIL_PIN 2                // Soil on GPIO2 (GPIO1 is tied to battery-sense)
 #define RESET_BTN 0               // PRG button (GPIO0): hold 3s to redo Wi-Fi setup
 
-#define FW_VERSION "3.6"          // self-provisioning + unique-per-chip pairing code
+#define FW_VERSION "3.11"         // optional VBUS sense on GPIO7 -> true USB vs battery
 #define WDT_TIMEOUT_S 60          // reboot if the firmware hangs this long
 #define DIM_AFTER_MS (5UL * 60UL * 1000UL)  // dim the OLED after 5 idle minutes
 #define SELFTEST_HOLD_MS 10000    // hold the sensor self-test on screen this long to read it
@@ -59,6 +63,16 @@
 #define VBAT_CTRL 37
 #define VBAT_ADC  1
 static const float BAT_MIN_V = 3.04, BAT_MAX_V = 4.26;
+
+// ----------------- USB-power sense (OPTIONAL hardware mod) -----------------
+// The V3 exposes no USB/charge signal, so by default the firmware can only guess
+// power state from battery voltage (imperfect: a board on USB with no battery reads
+// a charger-held voltage that looks like a real pack). To fix it for real, add a
+// 100k/100k divider from the board's 5V pin to GND with the midpoint on GPIO7, then
+// set USE_VBUS_SENSE to 1: the firmware then KNOWS when USB is plugged in
+// (midpoint ~2.5V) vs running on battery (0V).
+#define USE_VBUS_SENSE 0          // set to 1 ONLY on boards that have the divider wired
+#define VBUS_ADC 7                // GPIO7 (A6): reads the divider midpoint
 static const uint8_t BAT_CURVE[100] = {
   254,242,230,227,223,219,215,213,210,207, 206,202,202,200,200,199,198,198,196,196,
   195,195,194,192,191,188,187,185,185,185, 183,182,180,179,178,175,175,174,172,171,
@@ -66,7 +80,9 @@ static const uint8_t BAT_CURVE[100] = {
   143,142,140,140,136,132,130,130,129,126, 125,124,121,120,118,116,115,114,112,112,
   110,110,108,106,106,104,102,101, 99, 97,  94, 90, 81, 80, 76, 73, 66, 52, 32,  7,
 };
-int batteryPct = -1;   // -1 until first read
+int batteryPct = -1;       // -1 until first read (and when no battery is connected)
+bool charging = false;     // inferred from voltage trend (no charge-status pin on the V3)
+float battVSmooth = -1;    // slow EMA of battery voltage, reference for the trend test
 
 // ----------------- On-board OLED (Heltec V3) -----------------
 #define VEXT_PIN 36
@@ -165,23 +181,81 @@ String apSsid() {
   return String(b);
 }
 
+// True when USB power is present, read from the optional 5V -> 100k -> GPIO7 ->
+// 100k -> GND divider. Returns false when the mod isn't built (USE_VBUS_SENSE 0).
+bool usbPlugged() {
+#if USE_VBUS_SENSE
+  return analogReadMilliVolts(VBUS_ADC) > 1000;   // midpoint ~2.5V plugged, ~0V on battery
+#else
+  return false;
+#endif
+}
+
 // Battery percent from the V3's calibrated discharge curve. Returns -1 when no
 // real battery is on the V3's dedicated LiPo connector (e.g. USB-powered), so
 // the app shows "AC power" instead of a false "Battery 0%".
 int readBatteryPercent() {
   pinMode(VBAT_CTRL, OUTPUT);
-  digitalWrite(VBAT_CTRL, LOW);   // connect the divider
-  delay(5);
-  int raw = analogRead(VBAT_ADC);
-  pinMode(VBAT_CTRL, INPUT);      // release (it's pulled up) to save power
+  digitalWrite(VBAT_CTRL, HIGH);  // this board enables the divider with HIGH (verified on the bench;
+  delay(100);                     //   the documented LOW reads 0 here). 100ms to settle.
+  long acc = 0;                   // average 16 samples to quiet ADC noise (needed for trend below)
+  for (int i = 0; i < 16; i++) { acc += analogRead(VBAT_ADC); delay(2); }
+  pinMode(VBAT_CTRL, INPUT);      // release to save power
+  float raw = acc / 16.0f;
   float v = raw / 238.7f;         // Heltec V3 calibration -> volts
-  Serial.printf("Battery: adc=%d  vbat=%.2fV\n", raw, v);   // diagnostic
-  if (v < 2.5f) return -1;        // implausibly low = no battery on the connector
+  if (v < 2.5f) {                 // implausibly low = no battery on the connector
+    charging = false;
+    Serial.printf("Battery: adc=%.0f  vbat=%.2fV  (no battery)\n", raw, v);
+    return -1;
+  }
+  // ---- charging / power state ----
+  // EMA gives a slow reference; v above it = climbing (current flowing in), below = draining.
+  if (battVSmooth < 0) battVSmooth = v;
+  float dv = v - battVSmooth;
+  battVSmooth += 0.20f * (v - battVSmooth);
+
+#if USE_VBUS_SENSE
+  // A REAL "USB plugged in" signal on GPIO7. Trust it: never report "on battery"
+  // while plugged in, which is what the voltage-only guess gets wrong.
+  bool plugged = usbPlugged();
+  if (!plugged) {
+    charging = false;                          // truly on battery -> show the real %
+  } else if (v >= 4.18f && dv < 0.004f) {
+    charging = false;                          // plugged + topped off -> on wall power
+    Serial.printf("Battery: vbat=%.2fV  AC (USB, full)\n", v);
+    return -1;
+  } else {
+    charging = true;                           // plugged + not full -> charging
+  }
+  Serial.printf("Battery: vbat=%.2fV  %s  [VBUS:%s]\n", v, charging ? "CHARGING" : "battery", plugged ? "USB" : "batt");
+#else
+  // No VBUS wire: infer power state from voltage alone (best effort).
+  if      (dv >  0.006f)  charging = true;   // voltage rising -> on the charger
+  else if (v  >= 4.18f)   charging = true;   // pinned at the charger's top -> plugged in / topping off
+  else if (dv < -0.006f)  charging = false;  // falling -> running on the battery
+  // pinned high & flat = full-and-plugged OR no battery on USB -> report AC, not a phantom %
+  if (v >= 4.22f && dv < 0.004f) {
+    charging = false;
+    return -1;
+  }
+  Serial.printf("Battery: adc=%.0f  vbat=%.2fV  %s\n", raw, v, charging ? "CHARGING" : "on battery");
+#endif
+  // ---- raw percent from the calibrated discharge curve ----
+  int rawPct = 0;
   float step = (BAT_MAX_V - BAT_MIN_V) / 256.0f;
   for (int n = 0; n < 100; n++) {
-    if (v > BAT_MIN_V + step * BAT_CURVE[n]) return 100 - n;
+    if (v > BAT_MIN_V + step * BAT_CURVE[n]) { rawPct = 100 - n; break; }
   }
-  return 0;
+  // ---- smooth the shown percent so it never jumps ----
+  // A charger inflates the terminal voltage the instant it connects, so a 44%
+  // pack would read ~65%. Move the displayed value at most 1% per read: while
+  // charging it only rises; on battery it eases toward the true reading.
+  static int displayedPct = -1;
+  if (displayedPct < 0)  displayedPct = rawPct;                       // first read: adopt
+  else if (charging)   { if (rawPct > displayedPct) displayedPct++; } // creep up only
+  else                 { if (rawPct > displayedPct) displayedPct++;
+                         else if (rawPct < displayedPct) displayedPct--; }
+  return displayedPct;
 }
 
 void oledInit() {
@@ -265,8 +339,8 @@ void pageConnection(bool online) {
   } else {
     oled.drawStr(2, 41, "Connecting...");
   }
-  oled.drawStr(2, 54, "Battery");
-  if (batteryPct >= 0) snprintf(val, sizeof(val), "%d%%", batteryPct);
+  oled.drawStr(2, 54, charging ? "Charging" : "Battery");
+  if (batteryPct >= 0) snprintf(val, sizeof(val), charging ? "%d%% +" : "%d%%", batteryPct);
   else snprintf(val, sizeof(val), "AC/USB");   // no battery on the sense connector
   drawRight(126, 54, val);
   oled.sendBuffer();
@@ -531,11 +605,17 @@ void setup() {
   pinMode(RESET_BTN, INPUT_PULLUP);
   delay(1000);
 
-  oledInit();
-  oledMessage("Starting up", "GrowthPulse");
+  // Did we just wake from the deep-sleep "off" state (PRG press), or is this a
+  // real cold boot / reset? Used so a wake-press doesn't get mistaken for the
+  // "hold PRG at boot to wipe Wi-Fi" gesture below.
+  bool wokeFromSleep = (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT1);
 
-  // Hold PRG while powering on to forget Wi-Fi and reopen setup.
-  if (digitalRead(RESET_BTN) == LOW) {
+  oledInit();
+  oledMessage(wokeFromSleep ? "Waking up" : "Starting up", "GrowthPulse");
+
+  // Hold PRG while powering on to forget Wi-Fi and reopen setup. Skipped when we
+  // woke from deep sleep, otherwise the wake-press would wipe Wi-Fi every time.
+  if (!wokeFromSleep && digitalRead(RESET_BTN) == LOW) {
     Serial.println("PRG held at boot: clearing saved Wi-Fi, reopening setup...");
     oledMessage("Clearing Wi-Fi", "reopening setup");
     WiFiManager wmReset;
@@ -618,6 +698,7 @@ void sendTelemetry() {
   // would omit this, letting the app fall back to showing LoRaWAN.
   root["wifiRssi"] = WiFi.RSSI();
   root["batteryPct"] = batteryPct;   // app shows the battery badge from this
+  root["charging"] = charging;       // voltage-inferred charging state (no charge pin on the V3)
   device->sendState(root);
 
   Serial.print("Sent  moisture=");
@@ -630,24 +711,59 @@ void sendTelemetry() {
 }
 
 // ============================================================
-// Hold PRG for 3 seconds (any time) to wipe Wi-Fi and reopen setup.
+// Power off: deep sleep until the PRG button (or RESET) wakes it.
 // ============================================================
-void maybeResetWifi() {
+void enterDeepSleep() {
+  Serial.println("Double-tap PRG: entering deep sleep. Press PRG or RESET to wake.");
+  oledMessage("Sleeping", "tap PRG to wake");
+  delay(1000);
+  oled.setPowerSave(1);                  // OLED off
+  digitalWrite(VEXT_PIN, HIGH);          // cut the Vext rail (OLED/sensors). HIGH = off on the V3.
+  // Wake when PRG (GPIO0) is pulled LOW by a button press. ext1 ANY_LOW is the
+  // portable RTC-GPIO wake on the S3 (GPIO0 is RTC-capable, with an external pull-up).
+  esp_sleep_enable_ext1_wakeup(1ULL << RESET_BTN, ESP_EXT1_WAKEUP_ANY_LOW);
+  delay(50);
+  esp_deep_sleep_start();                // chip halts here; a wake reboots into setup()
+}
+
+// ============================================================
+// PRG button:  single tap -> wake screen   |   double tap -> power off
+//              hold 3s     -> wipe Wi-Fi and reopen setup
+// ============================================================
+void handleButton() {
+  static bool wasDown = false;
   static unsigned long pressStart = 0;
-  if (digitalRead(RESET_BTN) == LOW) {        // PRG button held down
-    if (pressStart == 0) { pressStart = millis(); oledWake(); }  // any tap wakes the screen
-    else if (millis() - pressStart >= 3000) {
-      Serial.println("PRG held 3s: clearing saved Wi-Fi, reopening setup...");
-      oledMessage("Clearing Wi-Fi", "reopening setup");
-      delay(600);
-      WiFiManager wm;
-      wm.resetSettings();
-      delay(400);
-      ESP.restart();
-    }
-  } else {
-    pressStart = 0;                           // released before 3s, reset timer
+  static unsigned long lastTapEnd = 0;
+  static int tapCount = 0;
+  bool down = (digitalRead(RESET_BTN) == LOW);
+
+  if (down && !wasDown) {                       // press edge
+    pressStart = millis();
+    oledWake();                                 // any tap wakes the screen
   }
+  if (down && pressStart && millis() - pressStart >= 3000) {   // long hold -> factory reset
+    Serial.println("PRG held 3s: clearing saved Wi-Fi, reopening setup...");
+    oledMessage("Clearing Wi-Fi", "reopening setup");
+    delay(600);
+    WiFiManager wm;
+    wm.resetSettings();
+    delay(400);
+    ESP.restart();
+  }
+  if (!down && wasDown) {                        // release edge
+    unsigned long held = millis() - pressStart;
+    if (held < 700) {                           // a short tap (not a hold)
+      tapCount = (millis() - lastTapEnd < 600) ? tapCount + 1 : 1;
+      lastTapEnd = millis();
+      if (tapCount >= 2) {                       // two quick taps -> power off
+        tapCount = 0;
+        enterDeepSleep();
+      }
+    } else {
+      tapCount = 0;                             // a longer press isn't part of a double-tap
+    }
+  }
+  wasDown = down;
 }
 
 // ============================================================
@@ -676,7 +792,7 @@ void loop() {
   // customer can see the pairing code, the connection, and live readings.
   unsigned long waitStart = millis();
   while (millis() - waitStart < 3000) {
-    maybeResetWifi();
+    handleButton();
     updateScreenPower();
     if (millis() - lastPageSwitch >= PAGE_MS) {
       lastPageSwitch = millis();

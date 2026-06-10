@@ -114,7 +114,12 @@ export function AppProvider({ children }) {
   const [selectedDeviceId, setSelectedDeviceId] = useState(() => load('selectedDeviceId', null));
   const [alarmRules, setAlarmRules] = useState(() => load('alarmRules', DEFAULT_ALARMS));
   const [settings, setSettings] = useState(() => load('settings', { units: 'F', refreshMs: 2000, theme: 'auto' }));
-  const [tierId, setTierId] = useState(() => load('tier', isDemo ? 'pro' : 'free'));
+  const [tierId, setTierId] = useState(() => {
+    if (isDemo) return 'pro';
+    // The account is the source of truth so the plan follows the user to any
+    // browser or device; localStorage is just a fast local cache.
+    return (user.user_metadata && user.user_metadata.tier) || load('tier', 'free');
+  });
   const [showPlans, setShowPlans] = useState(false);
   const [journals, setJournals] = useState(() => load('journals', {}));
   const [gateways, setGateways] = useState(() => load('gateways', []));
@@ -444,7 +449,14 @@ export function AppProvider({ children }) {
 
   const updateSettings = useCallback((patch) => setSettings((s) => ({ ...s, ...patch })), []);
 
-  const setTier = useCallback((id) => setTierId(id), []);
+  const setTier = useCallback((id) => {
+    setTierId(id);
+    // Persist the plan on the account (not just this browser) so it survives
+    // logout and follows the user to any device. localStorage stays as a cache.
+    if (!isDemo && supabase) {
+      supabase.auth.updateUser({ data: { tier: id } }).catch(() => {});
+    }
+  }, [isDemo]);
   const openPlans = useCallback(() => setShowPlans(true), []);
   const closePlans = useCallback(() => setShowPlans(false), []);
 
