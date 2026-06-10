@@ -230,20 +230,46 @@ export const TRANSPORTS = {
   lorawan: { label: 'LoRaWAN', icon: 'lora', color: '#a06bff' },
 };
 
-// How a device is ACTUALLY connected right now, not the label the user picked.
-// A Wi-Fi node must never show as LoRaWAN.
-//
-//  1. If the node reported a Wi-Fi signal (wifiRssi), it's verified Wi-Fi.
-//  2. Otherwise: LoRaWAN node firmware does not exist yet, so any REAL claimed
-//     node that is genuinely reporting data is on Wi-Fi today. (Demo sample
-//     devices keep their showcase transport so the LoRaWAN UI can be shown.)
-//     Remove this clause when LoRaWAN nodes can actually report.
-//  3. Otherwise fall back to the configured transport.
+// How a device is ACTUALLY connected right now, read from its telemetry, not the
+// label the user picked. The node tells the truth: a Wi-Fi build reports wifiRssi,
+// a LoRaWAN build reports loraRssi plus a transport tag. Before any data has
+// arrived we fall back to the configured transport.
 export function effectiveTransport(device) {
   if (!device) return 'wifi';
-  if (device.reading && device.reading.wifiRssi != null) return 'wifi';
-  if (device.losantDeviceId && device.hasData) return 'wifi';
+  const r = device.reading;
+  if (r) {
+    if (r.transport === 'lorawan' || r.loraRssi != null) return 'lorawan';
+    if (r.wifiRssi != null) return 'wifi';
+  }
   return device.transport || 'wifi';
+}
+
+// Signal readout for a device's CURRENT link, transport-aware. Wi-Fi reports RSSI
+// in dBm; LoRaWAN reports RSSI plus SNR (dB). Returns null when there's nothing
+// to show yet (no data, or the node hasn't reported a signal field).
+export function signalInfo(device) {
+  if (!device || !device.reading) return null;
+  const r = device.reading;
+  if (effectiveTransport(device) === 'lorawan') {
+    if (r.loraRssi == null && r.loraSnr == null) return null;
+    return {
+      kind: 'lorawan',
+      rssi: r.loraRssi != null ? Math.round(r.loraRssi) : null,
+      snr: r.loraSnr != null ? Math.round(r.loraSnr * 10) / 10 : null,
+    };
+  }
+  if (r.wifiRssi == null) return null;
+  return { kind: 'wifi', rssi: Math.round(r.wifiRssi), snr: null };
+}
+
+// Short human label for a signalInfo(): "-62 dBm" for Wi-Fi, "-95 dBm · SNR 8"
+// for LoRaWAN. Empty string when there's nothing to show.
+export function signalLabel(sig) {
+  if (!sig) return '';
+  const parts = [];
+  if (sig.rssi != null) parts.push(`${sig.rssi} dBm`);
+  if (sig.kind === 'lorawan' && sig.snr != null) parts.push(`SNR ${sig.snr}`);
+  return parts.join(' · ');
 }
 
 // --- display helpers for units and trends ---

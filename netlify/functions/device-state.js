@@ -25,6 +25,7 @@ export const handler = async (event) => {
     const s = await res.json();
     const num = (k) => (s[k] && typeof s[k].value === 'number' ? s[k].value : null);
     const bool = (k) => (s[k] && typeof s[k].value === 'boolean' ? s[k].value : null);
+    const str = (k) => (s[k] && typeof s[k].value === 'string' ? s[k].value : null);
     const reading = {
       airTemperatureF: num('airTemperatureF'),
       airHumidity: num('airHumidity'),
@@ -34,9 +35,13 @@ export const handler = async (event) => {
       // Battery-powered units (future firmware) report these; AC units don't.
       batteryPct: num('batteryPct'),
       charging: bool('charging'),
-      // Live link signal. Present => the node verified it's on Wi-Fi, so the
-      // app shows the real connection instead of a user-chosen label.
+      // Live link signal, transport-aware. A Wi-Fi build reports wifiRssi; a
+      // LoRaWAN build reports loraRssi/loraSnr plus a transport tag. The app uses
+      // whichever is present to show the node's REAL connection, not a label.
       wifiRssi: num('wifiRssi'),
+      loraRssi: num('loraRssi'),
+      loraSnr: num('loraSnr'),
+      transport: str('transport'),
       time: s.soilMoisturePercent ? new Date(s.soilMoisturePercent.time).getTime() : Date.now(),
     };
     return {

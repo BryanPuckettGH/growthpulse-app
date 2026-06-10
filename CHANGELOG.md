@@ -6,6 +6,12 @@ All notable changes to GrowthPulse, the web app and the device firmware.
 
 ## Web App
 
+### v2.17.0 — June 9, 2026
+- LoRaWAN is now real, not "in development." The app shows a node's true link from its telemetry: a Wi-Fi build reports Wi-Fi, a LoRaWAN build (that joins through your gateway) shows as LoRaWAN. Removed the interim code that forced every node to display Wi-Fi, and removed the "still in development" notes.
+- Live LoRa signal: the connection badge now shows real link quality, Wi-Fi RSSI for Wi-Fi nodes, and RSSI plus SNR for LoRaWAN nodes, on the dashboard and device cards. The `device-state` and uplink pipeline now carry `loraRssi`, `loraSnr`, and the transport tag end to end.
+- Gateways follow your account. LoRaWAN gateways are now saved to your Supabase account instead of only the browser, so they persist across logins and devices (requires the one-line `docs/growthpulse-gateways-schema.sql` migration). Same fix class as plans persisting.
+- Honest flows: onboarding no longer assumes Wi-Fi (you pick Wi-Fi or a LoRaWAN gateway when claiming), and switching a device to LoRaWAN now explains it joins through the gateway and reports every few minutes.
+
 ### v2.16.0 — June 9, 2026
 - Your plan now sticks. The subscription tier (Free / Plus / Pro) is saved on your account instead of only in the browser, so it follows you across logins and devices. Before, a fresh login defaulted back to Free and you had to "upgrade" again every time.
 

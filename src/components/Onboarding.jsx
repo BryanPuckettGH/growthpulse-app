@@ -18,8 +18,8 @@ export default function Onboarding() {
         <img className="onboard__icon" src="/growthpulse-icon.svg" alt="" />
         <h2 className="onboard__title">Welcome to GrowthPulse</h2>
         <p className="muted">
-          Power on your GrowthPulse and connect it to your Wi-Fi, then enter its pairing code here to
-          bring your plant online.
+          Power on your GrowthPulse, then enter its pairing code here to bring your plant online. You'll
+          pick how it connects, your Wi-Fi or a LoRaWAN gateway, on the next step.
         </p>
         <button className="btn btn--green" style={{ marginTop: 18 }} onClick={() => setOpen(true)}>Connect a device</button>
         <button className="btn btn--ghost" style={{ marginTop: 10 }} onClick={logout}>

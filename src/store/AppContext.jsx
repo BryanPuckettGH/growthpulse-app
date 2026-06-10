@@ -49,6 +49,17 @@ function buildDevice(d) {
   // actually reports a reading. Only demo/sample devices get simulated values.
   const claimed = !!d.losantDeviceId;
   const r = claimed ? { ...EMPTY_READING } : seedReading();
+  // Demo (sample) devices carry a believable link signal so the showcase
+  // reflects the real transport UI (Wi-Fi RSSI, or LoRaWAN RSSI + SNR).
+  if (!claimed) {
+    if ((d.transport || 'wifi') === 'lorawan') {
+      r.transport = 'lorawan';
+      r.loraRssi = -95 - Math.round(Math.random() * 15); // ~ -95..-110 dBm
+      r.loraSnr = +(6 + Math.random() * 4).toFixed(1);   // ~ 6..10 dB
+    } else {
+      r.wifiRssi = -50 - Math.round(Math.random() * 25); // ~ -50..-75 dBm
+    }
+  }
   return {
     ...d,
     // Ethernet was retired; normalize any older saved devices to Wi-Fi.
@@ -122,7 +133,9 @@ export function AppProvider({ children }) {
   });
   const [showPlans, setShowPlans] = useState(false);
   const [journals, setJournals] = useState(() => load('journals', {}));
-  const [gateways, setGateways] = useState(() => load('gateways', []));
+  // Real accounts load gateways from the cloud (below) so they follow the
+  // account to any device; demo keeps them in browser storage.
+  const [gateways, setGateways] = useState(() => (isDemo ? load('gateways', []) : []));
   const [weather, setWeather] = useState(null);
 
   // Live ref so the polling loop always sees the latest device list.
@@ -244,6 +257,11 @@ export function AppProvider({ children }) {
             };
           }
           const r = nextReading(d.reading);
+          // nextReading() only regenerates the four sensors; carry the demo
+          // link-signal fields forward so the transport/signal UI stays stable.
+          ['wifiRssi', 'loraRssi', 'loraSnr', 'transport'].forEach((k) => {
+            if (d.reading[k] != null) r[k] = d.reading[k];
+          });
           return { ...d, reading: r, history: [...d.history, r].slice(-60), lastSeen: r.time };
         })
       );
@@ -260,7 +278,25 @@ export function AppProvider({ children }) {
   useEffect(() => save('settings', settings), [settings]);
   useEffect(() => save('tier', tierId), [tierId]);
   useEffect(() => save('journals', journals), [journals]);
-  useEffect(() => save('gateways', gateways), [gateways]);
+  useEffect(() => { if (isDemo) save('gateways', gateways); }, [gateways]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Load this account's gateways from the cloud so they follow the user across
+  // logins and devices (real accounts only; demo stays in browser storage).
+  useEffect(() => {
+    if (isDemo || !supabase) return undefined;
+    let cancelled = false;
+    (async () => {
+      const { data: rows } = await supabase.from('gateways').select('*').order('created_at');
+      if (cancelled || !rows) return;
+      setGateways(rows.map((r) => ({
+        id: r.id,
+        name: r.name || 'My Gateway',
+        code: (r.eui || '').toUpperCase(),
+        addedAt: r.created_at ? new Date(r.created_at).getTime() : Date.now(),
+      })));
+    })();
+    return () => { cancelled = true; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Shared weather (virtual rain gauge), used by the weather card and rain alarms.
   // Pinned to the selected device's HOME location when it has one, so the
@@ -419,13 +455,19 @@ export function AppProvider({ children }) {
 
   // LoRaWAN gateways: the one piece of Farm Kit hardware that touches the
   // internet. Nodes join through them automatically; the app just tracks them.
-  const addGateway = useCallback((name, code) => {
-    const id = 'gw-' + Math.random().toString(36).slice(2, 6);
-    setGateways((gs) => [...gs, { id, name: name || 'My Gateway', code: (code || '').toUpperCase(), addedAt: Date.now() }]);
-  }, []);
+  const addGateway = useCallback(async (name, code) => {
+    const gw = { id: 'gw-' + Math.random().toString(36).slice(2, 6), name: name || 'My Gateway', code: (code || '').toUpperCase(), addedAt: Date.now() };
+    setGateways((gs) => [...gs, gw]); // optimistic
+    if (!isDemo && supabase) {
+      // Persist on the account so the gateway follows the user everywhere.
+      const { data: ins } = await supabase.from('gateways').insert({ name: gw.name, eui: gw.code }).select().single();
+      if (ins) setGateways((gs) => gs.map((g) => (g.id === gw.id ? { ...g, id: ins.id } : g)));
+    }
+  }, [isDemo]);
   const removeGateway = useCallback((id) => {
     setGateways((gs) => gs.filter((g) => g.id !== id));
-  }, []);
+    if (!isDemo && supabase) supabase.from('gateways').delete().eq('id', id).then(() => {});
+  }, [isDemo]);
 
   const addJournalEntry = useCallback((deviceId, entry) => {
     setJournals((j) => ({ ...j, [deviceId]: [{ id: 'e' + Date.now(), date: Date.now(), ...entry }, ...(j[deviceId] || [])] }));

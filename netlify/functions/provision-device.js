@@ -28,6 +28,11 @@ const ATTRS = [
   { name: 'wifiRssi', dataType: 'number' },
   { name: 'batteryPct', dataType: 'number' },
   { name: 'charging', dataType: 'boolean' },
+  // LoRaWAN link telemetry (set by the TTS uplink webhook for nodes that join
+  // through a gateway). Defined here so LoRaWAN state is never dropped.
+  { name: 'loraRssi', dataType: 'number' },
+  { name: 'loraSnr', dataType: 'number' },
+  { name: 'transport', dataType: 'string' },
 ];
 
 export const handler = async (event) => {

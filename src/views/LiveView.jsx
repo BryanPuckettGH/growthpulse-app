@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useApp } from '../store/AppContext';
 import {
   METRICS, PLANTS, statusOf, healthScore, recommendations, rangesForDevice, TRANSPORTS,
-  displayValue, displayUnit, trendOf, metricConnected, timeAgo, effectiveTransport,
+  displayValue, displayUnit, trendOf, metricConnected, timeAgo, effectiveTransport, signalInfo, signalLabel,
 } from '../store/helpers';
 import { MetricIcon, TransportIcon, Gauge, statusColor, PowerBadge } from '../components/UI';
 import Chart from '../components/Chart';
@@ -166,7 +166,7 @@ export default function LiveView() {
             </div>
             <div className="bar"><div className="bar__fill" style={{ width: `${health}%`, background: healthColor }} /></div>
             <div className="device__meta" style={{ marginTop: 12 }}>
-              <span className="badge"><TransportIcon name={t.icon} color={t.color} />{t.label}</span>
+              <span className="badge"><TransportIcon name={t.icon} color={t.color} />{t.label}{signalLabel(signalInfo(selectedDevice)) && ` · ${signalLabel(signalInfo(selectedDevice))}`}</span>
               <PowerBadge reading={r} />
               {selectedDevice.location && <span>· {selectedDevice.location}</span>}
             </div>
