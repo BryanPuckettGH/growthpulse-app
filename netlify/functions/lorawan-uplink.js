@@ -65,7 +65,7 @@ export const handler = async (event) => {
   const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
   let soilTemperatureF = num(decoded.soilTemperatureF);
   if (soilTemperatureF != null && soilTemperatureF < -100) soilTemperatureF = null;
-  const state = {
+  const rawState = {
     soilTemperatureF,
     airTemperatureF: num(decoded.airTemperatureF),
     airHumidity: num(decoded.airHumidity),
@@ -76,6 +76,14 @@ export const handler = async (event) => {
     loraRssi: up.rx_metadata && up.rx_metadata[0] ? num(up.rx_metadata[0].rssi) : null,
     loraSnr: up.rx_metadata && up.rx_metadata[0] ? num(up.rx_metadata[0].snr) : null,
   };
+  // Losant validates each attribute's type and rejects null for a Number
+  // attribute (which fails the whole update). Only send keys that actually have
+  // a value; a disconnected sensor simply isn't reported, and the app reads a
+  // missing attribute as "not connected", exactly like the Wi-Fi path.
+  const state = {};
+  for (const k in rawState) {
+    if (rawState[k] !== null && rawState[k] !== undefined) state[k] = rawState[k];
+  }
 
   const appId = process.env.LOSANT_APP_ID;
   const token = process.env.LOSANT_COMMAND_TOKEN;
