@@ -105,10 +105,11 @@ export const handler = async (event) => {
         body: JSON.stringify({ downlinks: [] }),
       });
     } catch { /* best-effort; the firmware also ignores a 0x00 in the first 20s after join */ }
-    // Ensure the Network Server tolerates a reset DevNonce, so the board joins on
-    // the first try after a reflash instead of failing with -1116 a few times.
+    // Ensure the JOIN SERVER tolerates a reset DevNonce, so the board joins on the
+    // first try after a reflash instead of failing with -1116 a few times.
+    // resets_join_nonces lives on the Join Server (the Network Server forbids it).
     try {
-      await fetch(`https://${cluster}/api/v3/ns/applications/${appId}/devices/${encodeURIComponent(existing.tts_device_id)}`, {
+      await fetch(`https://${cluster}/api/v3/js/applications/${appId}/devices/${encodeURIComponent(existing.tts_device_id)}`, {
         method: 'PUT',
         headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -168,14 +169,20 @@ export const handler = async (event) => {
   if (!r.ok) return { statusCode: 502, body: JSON.stringify({ error: 'TTS Identity Server create failed', detail: r.text }) };
 
   // 4b. Join Server: set the root key (AppKey). Only here.
+  // 4b. Join Server: set the root key (AppKey) and the nonce-reset behavior.
+  // resets_join_nonces is a JOIN SERVER field (the Network Server rejects it as a
+  // forbidden path). It tells the network to accept a DevNonce that restarts after
+  // a reflash/NVS wipe, so the board joins on the first try instead of failing
+  // with -1116 until the counter catches up.
   r = await tts(cluster, 'PUT', `js/applications/${appId}/devices/${deviceId}`, {
     end_device: {
       ids,
       network_server_address: cluster,
       application_server_address: cluster,
       root_keys: { app_key: { key: appKey } },
+      resets_join_nonces: true,
     },
-    field_mask: { paths: ['network_server_address', 'application_server_address', 'ids.device_id', 'ids.dev_eui', 'ids.join_eui', 'root_keys.app_key.key'] },
+    field_mask: { paths: ['network_server_address', 'application_server_address', 'ids.device_id', 'ids.dev_eui', 'ids.join_eui', 'root_keys.app_key.key', 'resets_join_nonces'] },
   });
   if (!r.ok) return { statusCode: 502, body: JSON.stringify({ error: 'TTS Join Server set-key failed', detail: r.text }) };
 
@@ -187,13 +194,9 @@ export const handler = async (event) => {
       lorawan_version: 'MAC_V1_0_4',
       lorawan_phy_version: 'RP002_V1_0_4',
       supports_join: true,
-      // The board's DevNonce restarts after a reflash/NVS wipe; tell the Network
-      // Server to accept that instead of dropping joins (the -1116 retries) until
-      // the counter catches up. Lets it join on the first try.
-      resets_join_nonces: true,
       network_server_address: cluster,
     },
-    field_mask: { paths: ['frequency_plan_id', 'lorawan_version', 'lorawan_phy_version', 'supports_join', 'resets_join_nonces'] },
+    field_mask: { paths: ['frequency_plan_id', 'lorawan_version', 'lorawan_phy_version', 'supports_join'] },
   });
   if (!r.ok) return { statusCode: 502, body: JSON.stringify({ error: 'TTS Network Server settings failed', detail: r.text }) };
 

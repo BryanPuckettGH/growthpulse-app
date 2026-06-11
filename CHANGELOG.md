@@ -6,6 +6,9 @@ All notable changes to GrowthPulse, the web app and the device firmware.
 
 ## Web App
 
+### v2.22.2 - June 12, 2026
+- Fixed `resets_join_nonces` never actually being set. It was being written to the Network Server, which rejects it as a forbidden field-mask path, so provisioning's attempt silently failed (and a new-device provision would have errored at that step). It is a Join Server setting; it now goes on the `js/` endpoint in both the create and reuse paths. With it set, a board joins LoRaWAN on the first try after a reflash instead of burning a minute of `-1116` DevNonce-catch-up retries.
+
 ### v2.22.1 - June 12, 2026
 - Fixed the gateway QR scanner that sometimes would not open or would not scan. The scanner effect depended on its `onResult` callback, which the Devices view recreated on every render (and it re-renders every few seconds from the live-polling loop), so the camera was torn down and restarted constantly and never got a stable moment to decode. The effect now runs once on mount and reads the latest callback through a ref. Also added `autoPlay` to the video and a metadata-load play retry so frames flow reliably (notably on iOS Safari, where `play()` can be rejected outside the original tap).
 
