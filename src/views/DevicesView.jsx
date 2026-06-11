@@ -234,9 +234,11 @@ function DeviceEditSheet({ device, onClose }) {
       setTimeout(onClose, 1800);
       return;
     }
-    // Switching a live LoRaWAN node back to Wi-Fi: the node is off the cloud's
-    // direct reach, so we queue a downlink it applies on its next check-in.
-    if (transport === 'wifi' && effectiveTransport(device) === 'lorawan' && !isDemoDevice(device)) {
+    // Switching a LoRaWAN node back to Wi-Fi: the node is off the cloud's direct
+    // reach, so we queue a downlink it applies on its next check-in. Gate on the
+    // SAVED transport (not the live card) so this still works while the card is
+    // briefly showing the wrong link.
+    if (transport === 'wifi' && device.transport === 'lorawan' && !isDemoDevice(device)) {
       setLwMsg('Queuing the switch back to Wi-Fi… the node applies it on its next check-in (up to a few minutes).');
       const err = await switchToWiFi(device.id);
       if (err) { setLwMsg('Wi-Fi switch failed: ' + err); setBusy(false); return; }

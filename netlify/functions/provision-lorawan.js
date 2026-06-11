@@ -145,7 +145,7 @@ export const handler = async (event) => {
   // 5. Store the route so the uplink webhook sends this device's data to the
   // board's existing Losant device (upsert on tts_device_id).
   try {
-    await fetch(`${supaUrl}/rest/v1/lorawan_devices`, {
+    const routeRes = await fetch(`${supaUrl}/rest/v1/lorawan_devices`, {
       method: 'POST',
       headers: {
         apikey: serviceKey,
@@ -155,10 +155,18 @@ export const handler = async (event) => {
       },
       body: JSON.stringify({ tts_device_id: deviceId, dev_eui: devEUI, losant_device_id: losantDeviceId, user_id: userId }),
     });
-  } catch {
+    // A Supabase REST error is a non-2xx response, not a thrown exception, so we
+    // must check the status explicitly. Otherwise the route silently never gets
+    // stored and the uplink webhook can never map this board's LoRaWAN traffic.
+    if (!routeRes.ok) {
+      const detail = await routeRes.text();
+      console.error(`Route store failed ${routeRes.status}: ${detail}`);
+      return { statusCode: 502, body: JSON.stringify({ error: 'Route store failed (TTS device was created)', detail }) };
+    }
+  } catch (e) {
     // The TTS device exists; if the route insert fails we surface it but the
     // device is registered. (Webhook also still has the static env-map fallback.)
-    return { statusCode: 502, body: JSON.stringify({ error: 'Route store failed (TTS device was created)' }) };
+    return { statusCode: 502, body: JSON.stringify({ error: 'Route store failed (TTS device was created)', detail: String((e && e.message) || e) }) };
   }
 
   // 6. Push the keys to the board via a Losant command, then it reboots into
