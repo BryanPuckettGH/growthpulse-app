@@ -80,21 +80,25 @@ export const handler = async (event) => {
   const joinEUI = '0000000000000000';
   const deviceId = 'gp-' + devEUI.toLowerCase();   // unique, lowercase
 
-  // Helper: one TTS API call, returns { ok, status, text }.
-  const tts = async (method, path, payload) => {
-    const res = await fetch(`https://${cluster}/api/v3/${path}`, {
+  // The Things Network quirk: the Identity Server (device REGISTRATION) is
+  // centralized on eu1, while the device's network/join/application servers run
+  // on the operating cluster (nam1). So the IS create goes to isHost; the JS/NS/AS
+  // calls go to the cluster.
+  const isHost = process.env.TTS_IS_HOST || 'eu1.cloud.thethings.network';
+  const tts = async (host, method, path, payload) => {
+    const res = await fetch(`https://${host}/api/v3/${path}`, {
       method,
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
     const text = await res.text();
-    if (!res.ok) console.error(`TTS ${method} ${path} -> ${res.status}: ${text}`);
+    if (!res.ok) console.error(`TTS ${method} ${host}/${path} -> ${res.status}: ${text}`);
     return { ok: res.ok, status: res.status, text };
   };
   const ids = { device_id: deviceId, dev_eui: devEUI, join_eui: joinEUI };
 
   // 4a. Identity Server: create the device registration.
-  let r = await tts('POST', `applications/${appId}/devices`, {
+  let r = await tts(isHost, 'POST', `applications/${appId}/devices`, {
     end_device: {
       ids,
       network_server_address: cluster,
@@ -106,7 +110,7 @@ export const handler = async (event) => {
   if (!r.ok) return { statusCode: 502, body: JSON.stringify({ error: 'TTS Identity Server create failed', detail: r.text }) };
 
   // 4b. Join Server: set the root key (AppKey). Only here.
-  r = await tts('PUT', `js/applications/${appId}/devices/${deviceId}`, {
+  r = await tts(cluster, 'PUT', `js/applications/${appId}/devices/${deviceId}`, {
     end_device: {
       ids,
       network_server_address: cluster,
@@ -118,7 +122,7 @@ export const handler = async (event) => {
   if (!r.ok) return { statusCode: 502, body: JSON.stringify({ error: 'TTS Join Server set-key failed', detail: r.text }) };
 
   // 4c. Network Server: MAC/PHY settings (US915 FSB2, MAC 1.0.4, OTAA).
-  r = await tts('PUT', `ns/applications/${appId}/devices/${deviceId}`, {
+  r = await tts(cluster, 'PUT', `ns/applications/${appId}/devices/${deviceId}`, {
     end_device: {
       ids,
       frequency_plan_id: freqPlan,
@@ -132,7 +136,7 @@ export const handler = async (event) => {
   if (!r.ok) return { statusCode: 502, body: JSON.stringify({ error: 'TTS Network Server settings failed', detail: r.text }) };
 
   // 4d. Application Server: register.
-  r = await tts('PUT', `as/applications/${appId}/devices/${deviceId}`, {
+  r = await tts(cluster, 'PUT', `as/applications/${appId}/devices/${deviceId}`, {
     end_device: {
       ids,
       application_server_address: cluster,

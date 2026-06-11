@@ -54,13 +54,16 @@ export const handler = async (event) => {
   const userId = process.env.TTS_USER_ID;
   const cluster = process.env.TTS_CLUSTER || 'nam1.cloud.thethings.network';
   const freqPlan = process.env.TTS_FREQ_PLAN || 'US_902_928_FSB_2';
+  // The gateway REGISTRATION is an Identity Server call (centralized on eu1 for
+  // TTN); the gateway's traffic server is the cluster (nam1).
+  const isHost = process.env.TTS_IS_HOST || 'eu1.cloud.thethings.network';
   if (!apiKey || !userId) {
     return { statusCode: 500, body: JSON.stringify({ error: 'Server not configured for TTS' }) };
   }
 
   const gatewayId = 'eui-' + eui.toLowerCase();
   try {
-    const res = await fetch(`https://${cluster}/api/v3/users/${encodeURIComponent(userId)}/gateways`, {
+    const res = await fetch(`https://${isHost}/api/v3/users/${encodeURIComponent(userId)}/gateways`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
