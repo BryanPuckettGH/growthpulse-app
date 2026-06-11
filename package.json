@@ -1,7 +1,7 @@
 {
   "name": "growthpulse-app",
   "private": true,
-  "version": "2.20.0",
+  "version": "2.21.0",
   "type": "module",
   "description": "GrowthPulse web app - live sensor monitoring, history, and alarms (React + Vite)",
   "scripts": {

@@ -6,6 +6,11 @@ All notable changes to GrowthPulse, the web app and the device firmware.
 
 ## Web App
 
+### v2.21.0 — June 10, 2026
+- LoRaWAN provisioning is now idempotent: one TTS device per board, reused on every switch, instead of minting a new DevEUI each time. The old behavior spawned an orphan TTS device on each Wi-Fi→LoRaWAN switch, so downlinks (the Wi-Fi switch-back) could land on a device the node never joined and fail with `no_device_session`. Provisioning now looks the board up by its Losant id and re-pushes its stored keys if it already has an identity. New migration `docs/growthpulse-lorawan-routes-schema-v2.sql` adds an `app_key` column and a uniqueness constraint on the board id (clears v1 orphan rows).
+- The Wi-Fi switch-back downlink now targets that single stable device, so it actually reaches the node.
+- Provisioning surfaces a real error if the route fails to store (previously a Supabase rejection was swallowed, leaving the uplink webhook unable to map the board).
+
 ### v2.20.0 — June 10, 2026
 - Round-trip transport switching now works both ways and shows the truth. The uplink webhook decodes the node's 9-byte payload itself, so an auto-provisioned LoRaWAN device no longer needs a per-device payload formatter set in The Things Stack; its readings (and LoRa RSSI/SNR + battery) land in the app immediately. A device on LoRaWAN now actually reads "LoRaWAN" on its card.
 - Switch a node back to Wi-Fi from the app: the new `lorawan-switch-wifi` function enqueues a downlink the node applies on its next check-in, then it reboots into Wi-Fi (a LoRaWAN node is off the cloud's direct reach, so a downlink is the only way down to it).

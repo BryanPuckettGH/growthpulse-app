@@ -74,10 +74,46 @@ export const handler = async (event) => {
     return { statusCode: 500, body: JSON.stringify({ error: 'Server not configured (TTS/Losant/Supabase env)' }) };
   }
 
-  // 4. Generate fresh OTAA credentials. JoinEUI = zeros (matches the firmware).
+  const joinEUI = '0000000000000000';
+
+  // 4. Reuse this board's existing LoRaWAN identity if it already has one. A
+  // board must map to exactly ONE TTS device, otherwise every Wi-Fi->LoRaWAN
+  // switch spawns a new DevEUI (orphan sprawl) and downlinks get aimed at a
+  // device the node never joined (no_device_session). So we look up the route
+  // by the board's Losant id first, and only create a TTS device if none exists.
+  const supaHeaders = { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` };
+  let existing = null;
+  try {
+    const q = `${supaUrl}/rest/v1/lorawan_devices?losant_device_id=eq.${encodeURIComponent(losantDeviceId)}&select=tts_device_id,dev_eui,app_key&limit=1`;
+    const look = await fetch(q, { headers: supaHeaders });
+    if (look.ok) {
+      const rows = await look.json();
+      if (Array.isArray(rows) && rows[0] && rows[0].app_key) existing = rows[0];
+    }
+  } catch { /* treat as no existing device */ }
+
+  // If we have a stored identity (with its AppKey), reuse it: just re-push the
+  // same keys to the board. No new TTS device, no orphan, stable downlink target.
+  if (existing) {
+    try {
+      const cmd = await fetch(`https://api.losant.com/applications/${losantApp}/devices/${encodeURIComponent(losantDeviceId)}/command`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${losantToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'provisionLoRa', payload: { joinEUI, devEUI: existing.dev_eui, appKey: existing.app_key } }),
+      });
+      if (!cmd.ok) {
+        const detail = await cmd.text();
+        return { statusCode: 502, body: JSON.stringify({ error: 'Could not send keys to the board', detail }) };
+      }
+    } catch (e) {
+      return { statusCode: 502, body: JSON.stringify({ error: 'Could not send keys to the board', detail: String((e && e.message) || e) }) };
+    }
+    return { statusCode: 200, body: JSON.stringify({ ok: true, ttsDeviceId: existing.tts_device_id, devEUI: existing.dev_eui, reused: true }) };
+  }
+
+  // 4b. No identity yet: generate fresh OTAA credentials. JoinEUI = zeros.
   const devEUI = hex(randomBytes(8));
   const appKey = hex(randomBytes(16));
-  const joinEUI = '0000000000000000';
   const deviceId = 'gp-' + devEUI.toLowerCase();   // unique, lowercase
 
   // The Things Network quirk: the Identity Server (device REGISTRATION) is
@@ -153,7 +189,7 @@ export const handler = async (event) => {
         'Content-Type': 'application/json',
         Prefer: 'resolution=merge-duplicates',
       },
-      body: JSON.stringify({ tts_device_id: deviceId, dev_eui: devEUI, losant_device_id: losantDeviceId, user_id: userId }),
+      body: JSON.stringify({ tts_device_id: deviceId, dev_eui: devEUI, app_key: appKey, losant_device_id: losantDeviceId, user_id: userId }),
     });
     // A Supabase REST error is a non-2xx response, not a thrown exception, so we
     // must check the status explicitly. Otherwise the route silently never gets
