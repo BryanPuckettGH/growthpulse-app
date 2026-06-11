@@ -413,7 +413,12 @@ export function AppProvider({ children }) {
       });
       if (!res.ok) {
         const e = await res.json().catch(() => ({}));
-        return e.error || 'LoRaWAN provisioning failed.';
+        let msg = e.error || 'LoRaWAN provisioning failed.';
+        if (e.detail) {
+          const d = typeof e.detail === 'string' ? e.detail : JSON.stringify(e.detail);
+          msg += ' — ' + d.slice(0, 300);
+        }
+        return msg;
       }
       return null;
     } catch {

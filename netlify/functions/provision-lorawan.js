@@ -88,6 +88,7 @@ export const handler = async (event) => {
       body: JSON.stringify(payload),
     });
     const text = await res.text();
+    if (!res.ok) console.error(`TTS ${method} ${path} -> ${res.status}: ${text}`);
     return { ok: res.ok, status: res.status, text };
   };
   const ids = { device_id: deviceId, dev_eui: devEUI, join_eui: joinEUI };
@@ -100,7 +101,7 @@ export const handler = async (event) => {
       application_server_address: cluster,
       join_server_address: cluster,
     },
-    field_mask: { paths: ['ids.dev_eui', 'ids.join_eui', 'network_server_address', 'application_server_address', 'join_server_address'] },
+    field_mask: { paths: ['network_server_address', 'application_server_address', 'join_server_address'] },
   });
   if (!r.ok) return { statusCode: 502, body: JSON.stringify({ error: 'TTS Identity Server create failed', detail: r.text }) };
 
