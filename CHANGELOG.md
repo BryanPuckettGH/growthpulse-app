@@ -6,6 +6,10 @@ All notable changes to GrowthPulse, the web app and the device firmware.
 
 ## Web App
 
+### v2.22.0 — June 11, 2026
+- Fixed the root cause of LoRaWAN data never reaching the app: Losant rejects an entire state report that includes an attribute the device doesn't define, so devices created before the `loraRssi`/`loraSnr`/`transport` attributes existed silently dropped every LoRaWAN uplink (Wi-Fi state, which has no LoRa fields, still worked). The repeated 502s caused The Things Stack to auto-deactivate the uplink webhook. `provision-device` now syncs the full attribute schema on every provision (not just on create), so existing devices self-heal on their next check-in.
+- `lorawan-uplink` now logs the exact outcome of each delivery (resolved device, 200/401/404/422/502 + Losant's rejection detail) to make webhook failures diagnosable in the Netlify function log.
+
 ### v2.21.0 — June 10, 2026
 - LoRaWAN provisioning is now idempotent: one TTS device per board, reused on every switch, instead of minting a new DevEUI each time. The old behavior spawned an orphan TTS device on each Wi-Fi→LoRaWAN switch, so downlinks (the Wi-Fi switch-back) could land on a device the node never joined and fail with `no_device_session`. Provisioning now looks the board up by its Losant id and re-pushes its stored keys if it already has an identity. New migration `docs/growthpulse-lorawan-routes-schema-v2.sql` adds an `app_key` column and a uniqueness constraint on the board id (clears v1 orphan rows).
 - The Wi-Fi switch-back downlink now targets that single stable device, so it actually reaches the node.

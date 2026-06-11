@@ -105,6 +105,11 @@ static const uint8_t BAT_CURVE[100] = {
 int batteryPct = -1;
 bool charging = false;
 float battVSmooth = -1;
+// When we last connected to Losant. Used to ignore stale/looping commands that
+// the broker redelivers the instant we reconnect (provisionLoRa / factoryReset),
+// which otherwise bounce the unit Wi-Fi<->LoRaWAN or wipe Wi-Fi on every connect.
+unsigned long losantConnectedAt = 0;
+const unsigned long CMD_GRACE_MS = 12000;
 
 // ----------------- On-board OLED (Heltec V3) -----------------
 #define VEXT_PIN 36
@@ -518,6 +523,17 @@ void connectWiFi() {
 
 void handleCommand(LosantCommand *command) {
   Serial.print("Cloud command: "); Serial.println(command->name);
+  // Ignore the destructive/mode-changing commands if they arrive in the first
+  // seconds after connecting. Real owner actions happen during steady operation;
+  // a command delivered the instant we connect is a stale one the broker is
+  // redelivering, and acting on it creates the Wi-Fi<->LoRaWAN bounce / Wi-Fi wipe.
+  bool destructive = (strcmp(command->name, "factoryReset") == 0)
+                  || (strcmp(command->name, "provisionLoRa") == 0)
+                  || (strcmp(command->name, "setMode") == 0);
+  if (destructive && (millis() - losantConnectedAt) < CMD_GRACE_MS) {
+    Serial.println("  ignored: stale command within connect grace window");
+    return;
+  }
   if (strcmp(command->name, "factoryReset") == 0) {
     oledMessage("Reset by owner", "clearing Wi-Fi...");
     delay(800);
@@ -598,6 +614,7 @@ void connectLosant() {
   oledMessage("Connecting to", "GrowthPulse cloud");
   device->connect(wifiClient, losantAccessKey.c_str(), losantAccessSecret.c_str());
   while (!device->connected()) { esp_task_wdt_reset(); delay(500); }
+  losantConnectedAt = millis();   // start the stale-command grace window
 }
 
 void sendTelemetryWiFi() {
@@ -729,18 +746,29 @@ void handleButton() {
   static int tapCount = 0;
   bool down = (digitalRead(RESET_BTN) == LOW);
   if (down && !wasDown) { pressStart = millis(); oledWake(); }
-  if (down && pressStart && millis() - pressStart >= 3000) {
-    // Hold 3s: Wi-Fi units wipe Wi-Fi + reopen setup; either mode also resets to
-    // Wi-Fi mode so a stuck LoRaWAN unit can always be recovered by the owner.
-    oledMessage("Resetting", "to Wi-Fi setup");
-    delay(600);
-    WiFiManager wm; wm.resetSettings();
-    nvs.begin("gp", false); nvs.putString("netmode", "wifi"); nvs.end();
-    delay(400); ESP.restart();
+  // Live hint while held so the owner knows which action they'll get on release.
+  if (down && pressStart) {
+    unsigned long h = millis() - pressStart;
+    if (h >= 10000)      oledMessage("Release for", "FACTORY RESET");
+    else if (h >= 3000)  oledMessage("Release: Wi-Fi", "keep holding: reset");
   }
   if (!down && wasDown) {
     unsigned long held = millis() - pressStart;
-    if (held < 700) {
+    if (held >= 10000) {
+      // Hold 10s: full factory reset. Wipe saved Wi-Fi + reopen the setup portal,
+      // for handing the unit to a new owner.
+      oledMessage("Factory reset", "reopening setup");
+      delay(500);
+      WiFiManager wm; wm.resetSettings();
+      nvs.begin("gp", false); nvs.putString("netmode", "wifi"); nvs.end();
+      delay(400); ESP.restart();
+    } else if (held >= 3000) {
+      // Hold 3s: graceful recovery. Switch back to Wi-Fi mode but KEEP the saved
+      // Wi-Fi, so a stuck LoRaWAN unit rejoins its own network with no re-pairing.
+      oledMessage("Switching to", "Wi-Fi mode");
+      nvs.begin("gp", false); nvs.putString("netmode", "wifi"); nvs.end();
+      delay(400); ESP.restart();
+    } else if (held < 700) {
       tapCount = (millis() - lastTapEnd < 600) ? tapCount + 1 : 1;
       lastTapEnd = millis();
       if (tapCount >= 2) { tapCount = 0; enterDeepSleep(); }

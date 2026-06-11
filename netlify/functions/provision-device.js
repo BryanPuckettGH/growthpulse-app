@@ -109,6 +109,19 @@ export const handler = async (event) => {
       }
     }
 
+    // 2b) Keep the device's attribute schema current even for devices that
+    //     already existed (those created before newer attributes like loraRssi /
+    //     loraSnr / transport were added). Losant rejects an ENTIRE state report
+    //     that includes an attribute the device doesn't define, which silently
+    //     drops every LoRaWAN uplink and deactivates the TTS webhook. Best-effort.
+    try {
+      await fetch(`https://api.losant.com/applications/${appId}/devices/${encodeURIComponent(deviceId)}`, {
+        method: 'PATCH',
+        headers: losantHeaders,
+        body: JSON.stringify({ attributes: ATTRS }),
+      });
+    } catch { /* provisioning still succeeds even if the schema sync fails */ }
+
     // 3) Mint a fresh access key scoped to just this device (handles first
     //    provision and re-provision after a factory reset / NVS wipe).
     const keyRes = await fetch(`https://api.losant.com/applications/${appId}/keys`, {

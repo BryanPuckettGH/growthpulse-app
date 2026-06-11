@@ -52,6 +52,7 @@ export const handler = async (event) => {
   if (expected) {
     const got = event.headers['x-webhook-token'] || event.headers['X-Webhook-Token'];
     if (got !== expected) {
+      console.error('[lorawan-uplink] 401 bad webhook token (LORAWAN_WEBHOOK_TOKEN mismatch)');
       return { statusCode: 401, body: JSON.stringify({ error: 'Bad webhook token' }) };
     }
   }
@@ -78,6 +79,7 @@ export const handler = async (event) => {
     decoded = decodeFrmPayload(up.frm_payload);
   }
   if (!decoded || typeof decoded !== 'object') {
+    console.error('[lorawan-uplink] 422 could not decode. frm_payload=', up.frm_payload);
     return { statusCode: 422, body: JSON.stringify({ error: 'No decoded_payload and frm_payload not decodable' }) };
   }
 
@@ -99,8 +101,10 @@ export const handler = async (event) => {
   }
   if (!losantDeviceId) losantDeviceId = process.env.LORAWAN_DEFAULT_DEVICE_ID || '';
   if (!losantDeviceId) {
+    console.error(`[lorawan-uplink] 404 no Losant mapping for TTS device "${ttsDeviceId}"`);
     return { statusCode: 404, body: JSON.stringify({ error: `No Losant mapping for TTS device "${ttsDeviceId}"` }) };
   }
+  console.log(`[lorawan-uplink] tts=${ttsDeviceId} -> losant=${losantDeviceId}`);
 
   // Build the same state shape the Wi-Fi node sends. Clean any sentinels the
   // same way the rest of the pipeline does.
@@ -145,10 +149,13 @@ export const handler = async (event) => {
     );
     if (!res.ok) {
       const text = await res.text();
+      console.error(`[lorawan-uplink] 502 Losant rejected state for ${losantDeviceId}: ${text} | state=${JSON.stringify(state)}`);
       return { statusCode: 502, body: JSON.stringify({ error: 'Losant rejected state', detail: text }) };
     }
+    console.log(`[lorawan-uplink] 200 forwarded to ${losantDeviceId}`);
     return { statusCode: 200, body: JSON.stringify({ forwarded: true, device: losantDeviceId }) };
   } catch (e) {
+    console.error('[lorawan-uplink] 502 exception:', String(e && e.message || e));
     return { statusCode: 502, body: JSON.stringify({ error: String(e && e.message || e) }) };
   }
 };
