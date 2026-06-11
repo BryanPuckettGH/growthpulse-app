@@ -131,17 +131,14 @@ export const handler = async (event) => {
       supports_join: true,
       network_server_address: cluster,
     },
-    field_mask: { paths: ['frequency_plan_id', 'lorawan_version', 'lorawan_phy_version', 'supports_join', 'network_server_address', 'ids.device_id', 'ids.dev_eui', 'ids.join_eui'] },
+    field_mask: { paths: ['frequency_plan_id', 'lorawan_version', 'lorawan_phy_version', 'supports_join'] },
   });
   if (!r.ok) return { statusCode: 502, body: JSON.stringify({ error: 'TTS Network Server settings failed', detail: r.text }) };
 
   // 4d. Application Server: register.
   r = await tts(cluster, 'PUT', `as/applications/${appId}/devices/${deviceId}`, {
-    end_device: {
-      ids,
-      application_server_address: cluster,
-    },
-    field_mask: { paths: ['application_server_address', 'ids.device_id', 'ids.dev_eui', 'ids.join_eui'] },
+    end_device: { ids },
+    field_mask: { paths: [] },
   });
   if (!r.ok) return { statusCode: 502, body: JSON.stringify({ error: 'TTS Application Server register failed', detail: r.text }) };
 
