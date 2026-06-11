@@ -105,6 +105,18 @@ export const handler = async (event) => {
         body: JSON.stringify({ downlinks: [] }),
       });
     } catch { /* best-effort; the firmware also ignores a 0x00 in the first 20s after join */ }
+    // Ensure the Network Server tolerates a reset DevNonce, so the board joins on
+    // the first try after a reflash instead of failing with -1116 a few times.
+    try {
+      await fetch(`https://${cluster}/api/v3/ns/applications/${appId}/devices/${encodeURIComponent(existing.tts_device_id)}`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          end_device: { ids: { device_id: existing.tts_device_id, dev_eui: existing.dev_eui, join_eui: joinEUI }, resets_join_nonces: true },
+          field_mask: { paths: ['resets_join_nonces'] },
+        }),
+      });
+    } catch { /* best-effort */ }
     try {
       const cmd = await fetch(`https://api.losant.com/applications/${losantApp}/devices/${encodeURIComponent(losantDeviceId)}/command`, {
         method: 'POST',
@@ -175,9 +187,13 @@ export const handler = async (event) => {
       lorawan_version: 'MAC_V1_0_4',
       lorawan_phy_version: 'RP002_V1_0_4',
       supports_join: true,
+      // The board's DevNonce restarts after a reflash/NVS wipe; tell the Network
+      // Server to accept that instead of dropping joins (the -1116 retries) until
+      // the counter catches up. Lets it join on the first try.
+      resets_join_nonces: true,
       network_server_address: cluster,
     },
-    field_mask: { paths: ['frequency_plan_id', 'lorawan_version', 'lorawan_phy_version', 'supports_join'] },
+    field_mask: { paths: ['frequency_plan_id', 'lorawan_version', 'lorawan_phy_version', 'supports_join', 'resets_join_nonces'] },
   });
   if (!r.ok) return { statusCode: 502, body: JSON.stringify({ error: 'TTS Network Server settings failed', detail: r.text }) };
 

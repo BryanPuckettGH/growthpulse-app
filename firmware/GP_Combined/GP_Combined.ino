@@ -684,10 +684,10 @@ bool lwJoin() {
       Serial.println("LoRaWAN: JOINED.");
       return true;
     }
-    Serial.printf("Join failed (%d). Retry in 30s. Hold PRG 3s to recover to Wi-Fi.\n", st);
+    Serial.printf("Join failed (%d). Retry in 10s. Hold PRG 3s to recover to Wi-Fi.\n", st);
     lwSaveNonces();             // persist the incremented DevNonce between attempts
     unsigned long w = millis();
-    while (millis() - w < 30000) { handleButton(); delay(20); esp_task_wdt_reset(); }
+    while (millis() - w < 10000) { handleButton(); delay(20); esp_task_wdt_reset(); }
   }
 }
 
@@ -841,7 +841,7 @@ void setup() {
       Serial.println("Join failed; retry in 30s. Press PRG-hold 3s to recover to Wi-Fi.");
       // keep the button responsive during the wait
       unsigned long w = millis();
-      while (millis() - w < 30000) { handleButton(); delay(20); esp_task_wdt_reset(); }
+      while (millis() - w < 10000) { handleButton(); delay(20); esp_task_wdt_reset(); }
     }
   } else {
     Serial.println("=== GrowthPulse (Wi-Fi mode) ===");
