@@ -113,6 +113,7 @@ float battVSmooth = -1;
 #define OLED_RST 21
 U8G2_SSD1306_128X64_NONAME_F_HW_I2C oled(U8G2_R0, OLED_RST, OLED_SCL, OLED_SDA);
 void oledMessage(const char* l1, const char* l2);   // forward decl (used before its definition below)
+void handleButton();
 
 // ----------------- Soil calibration -----------------
 int dryValue = 3600;
@@ -610,6 +611,7 @@ void sendTelemetryWiFi() {
   root["wifiRssi"] = WiFi.RSSI();
   root["batteryPct"] = batteryPct;
   root["charging"] = charging;
+  root["transport"] = "wifi";   // authoritative: overrides any stale LoRaWAN tag
   device->sendState(root);
 }
 
@@ -643,20 +645,31 @@ bool lwJoin() {
     return false;
   }
   radio.setDio2AsRfSwitch(true);
+  loraNode.setDutyCycle(false);   // US915 uses fair-use airtime, not a duty cycle
   lwRestoreNonces();
 
-  oledMessage("LoRaWAN", "joining gateway...");
-  Serial.println("LoRaWAN: OTAA join (US915 FSB2)...");
+  // beginOTAA only SETS the keys; activateOTAA performs the actual join.
   st = loraNode.beginOTAA(lwJoinEUI, lwDevEUI, lwNwkKey, lwAppKey);
-  // beginOTAA blocks through the join; >= 0 (RADIOLIB_LORAWAN_NEW_SESSION) = joined.
-  if (st < RADIOLIB_ERR_NONE) {
-    Serial.printf("Join failed: %d\n", st);
+  if (st != RADIOLIB_ERR_NONE) {
+    Serial.printf("beginOTAA setup failed: %d\n", st);
     return false;
   }
-  lwSaveNonces();
-  loraJoined = true;
-  Serial.println("LoRaWAN: JOINED.");
-  return true;
+  oledMessage("LoRaWAN", "joining gateway...");
+  Serial.println("LoRaWAN: OTAA join (US915 FSB2)...");
+  while (true) {
+    esp_task_wdt_reset();
+    st = loraNode.activateOTAA();
+    if (st == RADIOLIB_LORAWAN_NEW_SESSION || st == RADIOLIB_LORAWAN_SESSION_RESTORED) {
+      lwSaveNonces();
+      loraJoined = true;
+      Serial.println("LoRaWAN: JOINED.");
+      return true;
+    }
+    Serial.printf("Join failed (%d). Retry in 30s. Hold PRG 3s to recover to Wi-Fi.\n", st);
+    lwSaveNonces();             // persist the incremented DevNonce between attempts
+    unsigned long w = millis();
+    while (millis() - w < 30000) { handleButton(); delay(20); esp_task_wdt_reset(); }
+  }
 }
 
 // Pack the 9-byte payload the TTS formatter decodes, send it, capture the link
@@ -678,23 +691,23 @@ void lwSendReading() {
     flags,
   };
 
-  uint8_t dlBuf[16]; size_t dlLen = sizeof(dlBuf);
-  int16_t rxState = loraNode.sendReceive(payload, sizeof(payload), UPLINK_FPORT, dlBuf, &dlLen);
-  if (rxState < RADIOLIB_ERR_NONE) {
-    Serial.printf("Uplink error: %d\n", rxState);
-    return;
-  }
+  uint8_t dlBuf[64]; size_t dlLen = sizeof(dlBuf);
+  LoRaWANEvent_t evDown;
+  // Same 8-arg form the standalone uses: payload, len, fPort, downlink buffer +
+  // length, not-confirmed, no uplink event, downlink event (for its fPort).
+  int16_t rxState = loraNode.sendReceive(payload, sizeof(payload), UPLINK_FPORT, dlBuf, &dlLen, false, nullptr, &evDown);
   loraRssi = (int)radio.getRSSI();
   loraSnr  = radio.getSNR();
-  Serial.printf("Uplink sent. RSSI=%d SNR=%.1f%s\n", loraRssi, loraSnr, rxState > 0 ? "  (downlink)" : "");
-
-  // Downlink handling: a 1-byte command switches the mode (0x00 = Wi-Fi).
-  // Send it from the app/TTS on fPort 11 with payload 00 to pull a unit back to
-  // Wi-Fi. (Reading the exact downlink fPort varies by RadioLib version, so we
-  // keep it simple: a single 0x00 byte = switch to Wi-Fi and reboot.)
-  if (rxState > 0 && dlLen == 1 && dlBuf[0] == 0x00) {
-    setModeAndReboot("wifi");
+  if (rxState == RADIOLIB_ERR_NONE) {
+    Serial.printf("Uplink sent (no downlink). RSSI=%d SNR=%.1f\n", loraRssi, loraSnr);
+  } else if (rxState > 0) {
+    Serial.printf("Uplink sent; downlink RX%d. RSSI=%d SNR=%.1f\n", rxState, loraRssi, loraSnr);
+    // A 1-byte 0x00 downlink (sent on fPort 11) pulls the unit back to Wi-Fi.
+    if (dlLen == 1 && dlBuf[0] == 0x00) setModeAndReboot("wifi");
+  } else {
+    Serial.printf("Uplink error: %d\n", rxState);
   }
+  lwSaveNonces();
 }
 
 // ============================================================

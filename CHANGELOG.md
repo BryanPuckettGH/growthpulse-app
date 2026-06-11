@@ -6,6 +6,11 @@ All notable changes to GrowthPulse, the web app and the device firmware.
 
 ## Web App
 
+### v2.20.0 — June 10, 2026
+- Round-trip transport switching now works both ways and shows the truth. The uplink webhook decodes the node's 9-byte payload itself, so an auto-provisioned LoRaWAN device no longer needs a per-device payload formatter set in The Things Stack; its readings (and LoRa RSSI/SNR + battery) land in the app immediately. A device on LoRaWAN now actually reads "LoRaWAN" on its card.
+- Switch a node back to Wi-Fi from the app: the new `lorawan-switch-wifi` function enqueues a downlink the node applies on its next check-in, then it reboots into Wi-Fi (a LoRaWAN node is off the cloud's direct reach, so a downlink is the only way down to it).
+- The transport tag is now authoritative: both firmware paths stamp `transport` on every report, so a stale `loraRssi`/`wifiRssi` left in the cloud composite right after a switch can no longer make the card show the wrong link. New env var for the switch path: reuses `TTS_API_KEY`, `TTS_APP_ID`, `TTS_CLUSTER`.
+
 ### v2.19.0 — June 10, 2026
 - Automated LoRaWAN provisioning, the LoRaWAN twin of Wi-Fi self-provisioning. Switching a device to LoRaWAN in the app now sets the board up automatically: the new `provision-lorawan` function generates fresh OTAA keys, creates a unique end-device on The Things Stack (the 4-call IS/JS/NS/AS API), routes it to the board's existing Losant identity, and pushes the keys to the board (online over Wi-Fi), which reboots into LoRaWAN and joins. No console, no hand-pasted keys. Each switch mints its own DevEUI, so a teammate's board is flash-and-go on LoRaWAN.
 - Dynamic routing: the uplink webhook now resolves the target Losant device from the Supabase `lorawan_devices` table (written at provision time) instead of a hand-edited env map. New migration `docs/growthpulse-lorawan-routes-schema.sql`.

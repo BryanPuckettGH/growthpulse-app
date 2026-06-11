@@ -425,6 +425,35 @@ export function AppProvider({ children }) {
       return 'Could not reach the provisioning service.';
     }
   }, []);
+  // Switch a LoRaWAN node back to Wi-Fi. The node is off Losant's MQTT while on
+  // LoRaWAN, so we enqueue a 0x00 downlink via TTS; the node applies it on its
+  // next uplink and reboots to Wi-Fi. Returns null on success, or an error string.
+  const switchToWiFi = useCallback(async (id) => {
+    const d = devicesRef.current.find((x) => x.id === id);
+    if (!d || !d.losantDeviceId) return 'This device has no cloud identity yet.';
+    if (!supabase) return 'Accounts service unavailable.';
+    const { data: sess } = await supabase.auth.getSession();
+    if (!sess || !sess.session) return 'Please sign in again.';
+    try {
+      const res = await fetch('/.netlify/functions/lorawan-switch-wifi', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sess.session.access_token}` },
+        body: JSON.stringify({ losantDeviceId: d.losantDeviceId }),
+      });
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        let msg = e.error || 'Could not queue the Wi-Fi switch.';
+        if (e.detail) {
+          const det = typeof e.detail === 'string' ? e.detail : JSON.stringify(e.detail);
+          msg += ' — ' + det.slice(0, 300);
+        }
+        return msg;
+      }
+      return null;
+    } catch {
+      return 'Could not reach the switch service.';
+    }
+  }, []);
   // Removing a device also purges everything tied to it (journal, photos,
   // device-specific alarms) so a resold unit leaves nothing behind.
   const removeDevice = useCallback((id) => {
@@ -556,7 +585,7 @@ export function AppProvider({ children }) {
 
   const value = {
     user: { id: user.id, email: user.email, name: displayName, growerType: meta.grower_type || '' }, logout,
-    devices, devicesReady, isConnecting, selectedDevice, selectedDeviceId, setSelectedDeviceId, addDevice, claimDevice, setDevicePlant, updateDevice, removeDevice, factoryResetDevice, provisionLoRaWAN, setIrrigation, runPump, isDemo,
+    devices, devicesReady, isConnecting, selectedDevice, selectedDeviceId, setSelectedDeviceId, addDevice, claimDevice, setDevicePlant, updateDevice, removeDevice, factoryResetDevice, provisionLoRaWAN, switchToWiFi, setIrrigation, runPump, isDemo,
     alarmRules, addAlarmRule, addAlarmRules, updateAlarmRule, removeAlarmRule,
     settings, updateSettings,
     tier: TIERS[tierId] || TIERS.free, tierId, setTier, showPlans, openPlans, closePlans,

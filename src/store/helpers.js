@@ -238,7 +238,12 @@ export function effectiveTransport(device) {
   if (!device) return 'wifi';
   const r = device.reading;
   if (r) {
-    if (r.transport === 'lorawan' || r.loraRssi != null) return 'lorawan';
+    // An explicit transport tag is authoritative: both firmware paths now stamp
+    // it, so a stale loraRssi/wifiRssi lingering in the cloud composite state
+    // (e.g. right after a switch) can't override the node's current truth.
+    if (r.transport === 'lorawan') return 'lorawan';
+    if (r.transport === 'wifi') return 'wifi';
+    if (r.loraRssi != null) return 'lorawan';
     if (r.wifiRssi != null) return 'wifi';
   }
   return device.transport || 'wifi';

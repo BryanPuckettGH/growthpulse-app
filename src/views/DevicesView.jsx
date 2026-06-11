@@ -188,7 +188,7 @@ function GatewaySheet({ onClose, onAdd }) {
 }
 
 function DeviceEditSheet({ device, onClose }) {
-  const { updateDevice, removeDevice, factoryResetDevice, provisionLoRaWAN, devices } = useApp();
+  const { updateDevice, removeDevice, factoryResetDevice, provisionLoRaWAN, switchToWiFi, devices } = useApp();
   const [name, setName] = useState(device.name);
   const [location, setLocation] = useState(device.location);
   const [transport, setTransport] = useState(device.transport);
@@ -230,6 +230,17 @@ function DeviceEditSheet({ device, onClose }) {
       const err = await provisionLoRaWAN(device.id);
       if (err) { setLwMsg('LoRaWAN setup failed: ' + err); setBusy(false); return; }
       setLwMsg('LoRaWAN keys sent. The node is switching over now.');
+      setBusy(false);
+      setTimeout(onClose, 1800);
+      return;
+    }
+    // Switching a live LoRaWAN node back to Wi-Fi: the node is off the cloud's
+    // direct reach, so we queue a downlink it applies on its next check-in.
+    if (transport === 'wifi' && effectiveTransport(device) === 'lorawan' && !isDemoDevice(device)) {
+      setLwMsg('Queuing the switch back to Wi-Fi… the node applies it on its next check-in (up to a few minutes).');
+      const err = await switchToWiFi(device.id);
+      if (err) { setLwMsg('Wi-Fi switch failed: ' + err); setBusy(false); return; }
+      setLwMsg('Wi-Fi switch queued. The node will reconnect over Wi-Fi shortly.');
       setBusy(false);
       setTimeout(onClose, 1800);
       return;

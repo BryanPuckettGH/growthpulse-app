@@ -18,6 +18,30 @@
 // node; productionize this with a lookup table or a Supabase row keyed by
 // dev_eui. Set LORAWAN_DEVICE_MAP as JSON like
 //   {"growthpulse-node-01":"6a1fb486df527c8bf8d3324b"}
+// Decode the 9-byte uplink the firmware packs in lwSendReading():
+//   [0..1] soilTemperatureF * 10, int16 BE  (0x8000 = sensor absent)
+//   [2..3] airTemperatureF  * 10, int16 BE
+//   [4]    airHumidity %,           uint8
+//   [5..6] soilRaw (0-4095),        uint16 BE
+//   [7]    soilMoisturePercent,     uint8
+//   [8]    batteryPct (0-100),      uint8   (0xFF = unknown)
+function decodeFrmPayload(b64) {
+  if (!b64 || typeof b64 !== 'string') return null;
+  let buf;
+  try { buf = Buffer.from(b64, 'base64'); } catch { return null; }
+  if (buf.length < 9) return null;
+  const s16 = (hi, lo) => { let v = (hi << 8) | lo; if (v & 0x8000) v -= 0x10000; return v; };
+  const soilWord = (buf[0] << 8) | buf[1];
+  return {
+    soilTemperatureF: soilWord === 0x8000 ? null : s16(buf[0], buf[1]) / 10,
+    airTemperatureF: s16(buf[2], buf[3]) / 10,
+    airHumidity: buf[4],
+    soilRaw: (buf[5] << 8) | buf[6],
+    soilMoisturePercent: buf[7],
+    batteryPct: buf[8] === 0xFF ? null : buf[8],
+  };
+}
+
 export const handler = async (event) => {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: JSON.stringify({ error: 'POST only' }) };
@@ -46,9 +70,15 @@ export const handler = async (event) => {
     return { statusCode: 200, body: JSON.stringify({ ignored: 'no uplink_message' }) };
   }
 
-  const decoded = up.decoded_payload;
+  // Prefer the TTS payload formatter if one is set, but don't depend on it:
+  // auto-provisioned devices may not have a formatter, so decode the 9 raw bytes
+  // ourselves (same packing the firmware uses in lwSendReading()).
+  let decoded = up.decoded_payload;
   if (!decoded || typeof decoded !== 'object') {
-    return { statusCode: 422, body: JSON.stringify({ error: 'No decoded_payload (add the TTS uplink formatter)' }) };
+    decoded = decodeFrmPayload(up.frm_payload);
+  }
+  if (!decoded || typeof decoded !== 'object') {
+    return { statusCode: 422, body: JSON.stringify({ error: 'No decoded_payload and frm_payload not decodable' }) };
   }
 
   // Resolve which Losant device this TTS device maps to: static env map first,
@@ -83,6 +113,7 @@ export const handler = async (event) => {
     airHumidity: num(decoded.airHumidity),
     soilRaw: num(decoded.soilRaw),
     soilMoisturePercent: num(decoded.soilMoisturePercent),
+    batteryPct: num(decoded.batteryPct),
     // Tag the link so the app can show LoRaWAN + signal honestly.
     transport: 'lorawan',
     loraRssi: up.rx_metadata && up.rx_metadata[0] ? num(up.rx_metadata[0].rssi) : null,
