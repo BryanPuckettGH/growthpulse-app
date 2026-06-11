@@ -140,6 +140,7 @@ const char* linkLabel = "Wi-Fi";   // what the OLED prints; flips to "LoRaWAN"
 int   loraRssi = 0;
 float loraSnr  = 0;
 bool  loraJoined = false;
+unsigned long loraJoinedAt = 0;   // for ignoring a stale switch-to-Wi-Fi downlink right after join
 
 // ----------------- LoRaWAN objects + OTAA keys (from NVS) -----------------
 SX1262 radio = new Module(SX_NSS, SX_DIO1, SX_RST, SX_BUSY);
@@ -679,6 +680,7 @@ bool lwJoin() {
     if (st == RADIOLIB_LORAWAN_NEW_SESSION || st == RADIOLIB_LORAWAN_SESSION_RESTORED) {
       lwSaveNonces();
       loraJoined = true;
+      loraJoinedAt = millis();
       Serial.println("LoRaWAN: JOINED.");
       return true;
     }
@@ -720,7 +722,13 @@ void lwSendReading() {
   } else if (rxState > 0) {
     Serial.printf("Uplink sent; downlink RX%d. RSSI=%d SNR=%.1f\n", rxState, loraRssi, loraSnr);
     // A 1-byte 0x00 downlink (sent on fPort 11) pulls the unit back to Wi-Fi.
-    if (dlLen == 1 && dlBuf[0] == 0x00) setModeAndReboot("wifi");
+    // A 1-byte 0x00 = switch back to Wi-Fi. Ignore one that lands in the first
+    // 20s after joining: that's a stale queued downlink from an earlier session,
+    // not a deliberate switch (which always arrives during steady operation).
+    if (dlLen == 1 && dlBuf[0] == 0x00) {
+      if (millis() - loraJoinedAt > 20000) setModeAndReboot("wifi");
+      else Serial.println("Ignored stale switch-to-Wi-Fi downlink (just joined).");
+    }
   } else {
     Serial.printf("Uplink error: %d\n", rxState);
   }

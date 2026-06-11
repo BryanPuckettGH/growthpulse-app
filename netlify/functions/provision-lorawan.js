@@ -95,6 +95,16 @@ export const handler = async (event) => {
   // If we have a stored identity (with its AppKey), reuse it: just re-push the
   // same keys to the board. No new TTS device, no orphan, stable downlink target.
   if (existing) {
+    // Clear any pending downlink (e.g. a leftover 0x00 "switch to Wi-Fi" from an
+    // earlier session) so it can't fire the instant the node rejoins and bounce
+    // it straight back to Wi-Fi.
+    try {
+      await fetch(`https://${cluster}/api/v3/as/applications/${appId}/devices/${encodeURIComponent(existing.tts_device_id)}/down/replace`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ downlinks: [] }),
+      });
+    } catch { /* best-effort; the firmware also ignores a 0x00 in the first 20s after join */ }
     try {
       const cmd = await fetch(`https://api.losant.com/applications/${losantApp}/devices/${encodeURIComponent(losantDeviceId)}/command`, {
         method: 'POST',
