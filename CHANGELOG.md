@@ -160,6 +160,9 @@ All notable changes to GrowthPulse, the web app and the device firmware.
 
 One identical image that boots into either Wi-Fi or LoRaWAN based on a saved flag in flash (NVS). No per-board secrets live in the image. This is the firmware that ships on production units.
 
+### v4.3 - June 12, 2026
+- The OLED pairing screen now shows the running firmware version (small, just under the connection type), so the build on a unit is visible at a glance without opening the serial monitor.
+
 ### v4.2 - June 11, 2026
 - Switch-to-Wi-Fi from the app is responsive again. The LoRaWAN uplink interval was lowered from 15 minutes to 60 seconds for bench and demo use, because a class-A node can only receive a downlink (such as the switch-to-Wi-Fi command) during the short window right after it uplinks. A 15-minute interval meant a switch could take up to 15 minutes to land. The 15-minute value is the right production setting for The Things Network fair-use airtime, so the constant is documented for raising before shipping.
 - Removed the 20-second post-join guard on the switch-to-Wi-Fi downlink. The backend now clears any stale queued downlink when it provisions LoRaWAN, so any 0x00 the node receives is a real, deliberate switch and is acted on immediately. The guard had been suppressing legitimate switches that arrived shortly after a join.

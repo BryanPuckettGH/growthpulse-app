@@ -1,5 +1,5 @@
 /* ============================================================
-   GrowthPulse Node Firmware  v4.2  (COMBINED Wi-Fi + LoRaWAN)
+   GrowthPulse Node Firmware  v4.3  (COMBINED Wi-Fi + LoRaWAN)
    ------------------------------------------------------------
    Board: Heltec WiFi LoRa 32 V3 (ESP32-S3 + Semtech SX1262)
 
@@ -74,7 +74,7 @@
 #define SX_MISO  11
 #define SX_MOSI  10
 
-#define FW_VERSION "4.2"
+#define FW_VERSION "4.3"
 #define WDT_TIMEOUT_S 60
 #define DIM_AFTER_MS (5UL * 60UL * 1000UL)
 #define SELFTEST_HOLD_MS 10000
@@ -376,6 +376,10 @@ void pagePairCode(bool online) {
   oled.drawStr(2, 9, "PAIR CODE");
   char lk[16]; snprintf(lk, sizeof(lk), online ? "%s ON" : "%s ..", linkLabel);
   drawRight(126, 9, lk);
+  // Firmware version, small, just under the connection type.
+  oled.setFont(u8g2_font_5x7_tr);
+  drawRight(126, 19, "v" FW_VERSION);
+  oled.setFont(u8g2_font_6x10_tr);
   drawBigCentered(pairCode().c_str(), 56);
   oled.sendBuffer();
 }
