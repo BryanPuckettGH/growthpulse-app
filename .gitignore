@@ -12,6 +12,10 @@ npm-debug.log*
 .DS_Store
 .vscode/
 
+# Stray scratch artifacts
+err.txt
+*.tmp
+
 # Secrets - keep API keys and credentials OUT of the repo
 .env
 .env.local

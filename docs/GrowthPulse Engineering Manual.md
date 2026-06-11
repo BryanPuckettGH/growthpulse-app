@@ -907,11 +907,11 @@ Every failure below was actually encountered during development. Symptoms are ex
 
 # 13. Known Limitations and Roadmap
 
-1. **Per-unit cloud provisioning.** All flashed units currently share the demo unit's cloud identity. Production requires a flash-time provisioning station: generate per-unit Losant credentials, write them to the unit, create the cloud device, insert the registry row, print packaging.
+1. **~~Per-unit cloud provisioning.~~ DONE (§14.2).** Boards self-provision at first boot: each posts its chip-derived pairing code plus a shared firmware token to `provision-device`, which creates (or reuses) a per-board Losant device and returns a device-scoped access key. One image, no per-board secrets, no flash-time station.
 2. **~~Server-side device ownership.~~ DONE (§6.3, §7.2).** The `devices` table with per-user RLS is live: ownership is cloud-authoritative, syncs across browsers, enforces claim exclusivity, and `device-command` now verifies the caller owns the target before sending.
 3. **Zero-typing auto-bind.** The portal carries a one-time account token; the unit POSTs it to a bind endpoint on first connect. Claim codes are the shipping-grade interim.
-4. **LoRaWAN bring-up.** The SX1262 is on every board and a 915 MHz gateway (ThinkNode G1) is in hand: LoRaWAN firmware variant, a network server (The Things Stack or ChirpStack), webhook into the existing pipeline, transport switching via cloud command, and the app's gateway section binding to real gateway status.
-5. **Battery telemetry.** GPIO1 sense plus `batteryPct`/`charging` in the JSON; every consumer of those fields already exists.
+4. **~~LoRaWAN bring-up.~~ DONE (§14).** The combined firmware joins LoRaWAN through a ThinkNode G1 gateway on The Things Stack; uplinks route through the `lorawan-uplink` webhook into the same Losant device; transport switching is automated in both directions from the app; and gateways auto-register on the network. See the new §14 and the LoRaWAN System and Debugging Report.
+5. **~~Battery telemetry.~~ DONE (§14.11).** GPIO37-controlled battery sense (polarity-corrected for this board), inferred charging state, smoothed percent, and an optional VBUS divider for true USB-versus-battery detection. `batteryPct`/`charging` flow through both transports.
 6. **~~Durable history.~~ DONE (§7.4).** Reports now query Losant's time-series store through `device-history` for full-period graphs; the 60-reading in-memory ring remains only for the live trend/detail sheets.
 7. **Web push notifications** for alarm trips, complementing cloud email/SMS.
 8. **Billing.** Tiers are functional feature gates; Stripe integration replaces the demo "buy" path.
@@ -921,9 +921,176 @@ Every failure below was actually encountered during development. Symptoms are ex
 
 ---
 
-# 14. Appendix
+# 14. Dual-Transport System: Self-Provisioning, Combined Firmware, and LoRaWAN
 
-## 14.1 Links
+This section documents everything added after the June 5 revision: how a board gets its own cloud identity with no per-board secrets, the single image that runs either Wi-Fi or LoRaWAN, and the full LoRaWAN path through The Things Stack into the same Losant device the app already reads. The companion **GrowthPulse LoRaWAN System and Debugging Report** carries the chronological bug-by-bug record; this section is the reference architecture.
+
+## 14.1 Two transports, two clouds, one device
+
+GrowthPulse supports two ways for a node to reach the internet, and uses two managed clouds.
+
+- **Losant** is the device cloud and the single source of truth the app reads. Every node, Wi-Fi or LoRaWAN, is represented as exactly one Losant device. This is the design choice that lets a node change transports and remain one plant in the app: both transports write to the same Losant device.
+- **The Things Stack (TTS)** on The Things Network sandbox is the LoRaWAN network server. It owns gateways, OTAA join, and the LoRaWAN session, and forwards each uplink to a webhook. It stores no plant data; it is a bridge from the radio world into Losant.
+
+A Wi-Fi node publishes to Losant directly over MQTT. A LoRaWAN node reaches a gateway, which reaches TTS, which calls the `lorawan-uplink` webhook, which writes to Losant. Different path in, same destination.
+
+## 14.2 Wi-Fi self-provisioning (provision-device, device_registry)
+
+The "mail a customer a board" requirement means one image with no per-board secrets. A board earns its identity at first boot.
+
+1. The board derives a **pairing code** from its chip hardware id (the high bits of the efuse MAC). This is deterministic, so the same physical board always produces the same code, even after a factory reset.
+2. On first boot in Wi-Fi mode, after connecting to the network, the board POSTs `{ code, token }` to `provision-device.js`, where `token` is the shared firmware provisioning token (the same value as the Netlify `PROVISION_TOKEN`).
+3. The function looks the code up in the **device_registry** table. If the code is new, it creates a Losant device with the full attribute schema, registers the code-to-device mapping, and returns a fresh device-scoped access key. If the code already exists (a re-provision after a reset), it returns the same device, so a board never spawns a duplicate.
+4. The board saves the device id, access key, and secret to NVS and connects to Losant over MQTT.
+
+As of v2.22 the function also re-applies the full attribute schema on every call (a PATCH), so a device created before a newer attribute existed gains it on the next provision. This is what fixed the LoRaWAN state rejection in §14.14.
+
+The shared token is the only secret in the image, and the repository copy carries a placeholder; the real value is filled in only in a private build and is also set as the Netlify `PROVISION_TOKEN` so the function can authenticate the board.
+
+## 14.3 The combined firmware (GP_Combined): boot path and OLED
+
+`firmware/GP_Combined/GP_Combined.ino`, version 4.2, is the production image. A `netmode` flag in the NVS namespace `gp` selects the boot path: `wifi` (default) or `lorawan`.
+
+- **Wi-Fi path**: try saved Wi-Fi; if none or it fails, open the phone setup hotspot; self-provision if there is no saved Losant identity; then stream telemetry to Losant over MQTT every few seconds. Telemetry stamps `transport: "wifi"`, `wifiRssi`, `batteryPct`, and `charging`.
+- **LoRaWAN path**: bring up the SX1262, load OTAA keys from NVS, join through any gateway, and uplink a 9-byte payload every interval.
+
+The OLED cycles through three pages (about 5 seconds each): the pairing code with online status, the live connection page (link type, Wi-Fi dBm or LoRa RSSI and SNR, and battery or power), and the live sensor readings. The branded setup portal markup is shared with the Wi-Fi-only firmware.
+
+Mode is set three ways and each writes NVS then reboots: the portal's Connection field, a Losant `setMode` command (Wi-Fi units), or a LoRaWAN downlink (LoRaWAN units). The image overflows the default app partition, so it is built with a larger-app or "Huge App" partition scheme.
+
+## 14.4 LoRaWAN on the node: SX1262, OTAA, payload, downlinks
+
+The SX1262 pins are the Heltec V3 schematic values: NSS 8, DIO1 14, RST 12, BUSY 13, SCK 9, MISO 11, MOSI 10. Bring-up uses RadioLib's default 1.6V TCXO and `setDio2AsRfSwitch(true)`; US915 uses `setDutyCycle(false)` (fair-use airtime, not a duty cycle) and sub-band 2 (FSB2).
+
+OTAA is a two-step sequence in RadioLib, and getting this wrong cost a debugging cycle (§14.14, issue 10): `beginOTAA(joinEUI, devEUI, nwkKey, appKey)` only sets the keys and returns success without joining; `activateOTAA()` performs the actual join and returns a new-session or restored-session result. The firmware restores the saved join nonces, calls `beginOTAA`, then loops on `activateOTAA` with a 10-second backoff until it joins, persisting nonces between attempts so DevNonce keeps incrementing.
+
+Uplinks use the 8-argument `sendReceive(payload, len, fport, downBuf, &downLen, false, nullptr, &evDown)` form so a downlink can be captured in the same call. The 9-byte payload:
+
+```
+[0..1] soilTemperatureF * 10, int16 big-endian  (0x8000 = sensor absent)
+[2..3] airTemperatureF  * 10, int16 big-endian
+[4]    airHumidity percent,    uint8
+[5..6] soilRaw 0..4095,        uint16 big-endian
+[7]    soilMoisturePercent,    uint8
+[8]    batteryPct 0..100,      uint8   (0xFF = unknown)
+```
+
+A one-byte 0x00 downlink means "switch back to Wi-Fi"; the firmware writes `netmode = wifi` and reboots. The uplink interval (`LORA_UPLINK_MS`) is 60 seconds for bench and demo responsiveness and is documented to raise toward 15 minutes for The Things Network fair-use in production (§14.14, issue 22).
+
+## 14.5 The Things Stack topology and the four-call device API
+
+A critical, non-obvious fact about The Things Network: the **Identity Server** (which registers devices and gateways) is centralized on the **eu1** cluster, while a device's **Network, Join, and Application servers** run on the **operating cluster** (nam1 for North America). Creating a device through the API therefore touches two hosts and four endpoints:
+
+1. **Identity Server** (eu1): `POST /api/v3/applications/{app}/devices` creates the registration, with the network, application, and join server addresses set to the operating cluster.
+2. **Join Server** (nam1): `PUT /api/v3/js/applications/{app}/devices/{id}` sets the root key (AppKey). This is the only call that carries the key.
+3. **Network Server** (nam1): `PUT /api/v3/ns/...` sets the frequency plan, MAC and PHY versions, `supports_join`, and `resets_join_nonces`.
+4. **Application Server** (nam1): `PUT /api/v3/as/...` registers the device.
+
+Each server only accepts the field-mask paths it owns; sending one a path that belongs to another is rejected as a forbidden path (§14.14, issue 12). The four-call split and the eu1-versus-nam1 host split are both encoded in `provision-lorawan.js`.
+
+## 14.6 provision-lorawan.js: idempotent provisioning
+
+This function is the LoRaWAN twin of self-provisioning, called when the app switches a node to LoRaWAN. It is idempotent: **one TTS device per board**, which is the most important correctness property of the whole LoRaWAN system (§14.14, issues 14 and 8 of the report).
+
+1. Validate the signed-in user. Read the board's Losant id from the request.
+2. Look the board up in **lorawan_devices** by its Losant id. If a row with a stored AppKey exists, reuse that TTS device: clear its downlink queue, set `resets_join_nonces`, and re-push the stored keys to the board through a Losant `provisionLoRa` command. Return.
+3. If there is no row, generate a DevEUI and AppKey, create the TTS device through the four-call API, store the route (TTS device id, DevEUI, AppKey, Losant id, user id), and push the keys.
+
+Storing the AppKey in `lorawan_devices` is what makes reuse possible: the same keys can be re-pushed without minting a new device. A non-2xx Supabase response is checked explicitly, because a swallowed route-store failure leaves the webhook unable to map the board (§14.14, issue 13).
+
+## 14.7 lorawan-uplink.js: the webhook decode-and-route
+
+The webhook TTS calls on every uplink. It is deliberately self-sufficient.
+
+1. Verify the shared `X-Webhook-Token` header against `LORAWAN_WEBHOOK_TOKEN`.
+2. Take the uplink's `decoded_payload` if a TTS formatter set one; otherwise **decode the 9 raw bytes itself** from `frm_payload`. This removes any dependency on a per-device TTS payload formatter, which auto-provisioned devices do not have (§14.14, issue 13).
+3. Resolve the target Losant device from `lorawan_devices` by the uplink's TTS device id (with a static env-map and a default as fallbacks).
+4. Build the same state shape the Wi-Fi path sends, tag it with `transport: "lorawan"`, `loraRssi`, and `loraSnr`, omit any null field (Losant rejects a null for a typed Number attribute), and POST it to the Losant device.
+
+As of v2.22 it logs the exact outcome of each delivery (resolved device and a 200/401/404/422/502 with the rejection detail), because a silently failing webhook gets auto-deactivated by TTS and looks like it is not firing at all.
+
+## 14.8 lorawan-switch-wifi.js and register-gateway.js
+
+**lorawan-switch-wifi.js** brings a LoRaWAN node back to Wi-Fi. A LoRaWAN node is off Losant's MQTT, so a Losant command cannot reach it; the only path down is a LoRaWAN downlink, delivered during the node's next uplink window. The function looks up the board's TTS device by its Losant id and enqueues a one-byte 0x00 downlink on fPort 2 through the Application Server's `down/replace`. The node's firmware sees the 0x00 and reboots into Wi-Fi.
+
+**register-gateway.js** registers a customer's gateway on TTS under the GrowthPulse network so the customer never touches The Things Stack. The gateway registration is an Identity Server call (eu1), with the gateway server address pointing at the operating cluster. The gateway hardware must still be pre-configured before shipping to forward to the GrowthPulse TTS server on US915 FSB2; the app cannot reach inside the gateway to set that.
+
+## 14.9 Supabase tables: lorawan_devices (v2) and gateways
+
+**lorawan_devices** (migration `docs/growthpulse-lorawan-routes-schema-v2.sql`) maps a TTS end-device to the Losant device its uplinks land on:
+
+```
+tts_device_id     text primary key
+dev_eui           text not null
+app_key           text                       -- OTAA root key, re-pushed on reuse
+losant_device_id  text not null              -- UNIQUE: one TTS device per board
+user_id           uuid references auth.users
+created_at        timestamptz default now()
+```
+
+The unique index on `losant_device_id` enforces one TTS device per board. The v2 migration adds the `app_key` column and the unique index and clears v1 orphan rows.
+
+**gateways** (migration `docs/growthpulse-gateways-schema.sql`) stores LoRaWAN gateways on the account so they persist across logins.
+
+Both tables have Row Level Security on with no client policies; only the serverless functions, using the service role, read or write them.
+
+## 14.10 Transport switching, both directions, and the deadlock
+
+**Wi-Fi to LoRaWAN** works because the board is reachable on Losant while on Wi-Fi: the backend pushes keys through a Losant command, the board saves them and reboots into LoRaWAN, and joins.
+
+**LoRaWAN to Wi-Fi** is the hard direction. The board is off Losant, so the switch is a queued LoRaWAN downlink that lands on the next uplink. The app gates the switch on the **saved** transport, not the live card, so a momentarily wrong card cannot make the button inert (§14.14, issue 15).
+
+The deadlock to be aware of: provisioning or switching to LoRaWAN requires the board to be on Wi-Fi (to receive the Losant command). A board stuck on LoRaWAN cannot be reached that way. The escape hatch is the PRG button's 3-second graceful return to Wi-Fi (§14.12), which keeps saved credentials.
+
+## 14.11 Battery, charging, and the VBUS mod
+
+The Heltec V3 battery sense is read through a divider gated by GPIO37. On this board the control polarity is inverted from the documented reference, so the firmware drives it to the opposite level and averages 16 ADC samples. There is no charge-status pin, so charging is inferred from the voltage trend and the top-of-charge voltage. The reported percent is smoothed to creep at most 1% per reading, so a charger's instantaneous voltage inflation does not show as a jump.
+
+With no battery installed on USB, the charge chip pins the sense line near a full pack's voltage and the board has no battery-detect pin, so this cannot be fully resolved in software; the firmware reports AC when the line is pinned at the top and no longer rising. The honest hardware fix is an optional 100k/100k divider from the board's 5V pin to ground with the midpoint on GPIO7 (`USE_VBUS_SENSE` set to 1): about 2.5V on USB, 0V on battery. Default off.
+
+## 14.12 The PRG button state machine and command grace
+
+The PRG button (GPIO0) is tiered, acting on release:
+
+- **Single tap**: wake the OLED or wake from sleep.
+- **Double tap** (two short presses): enter deep sleep (microamp draw, screen off), the soft power-off. A single press or RESET wakes it.
+- **Hold 3 seconds**: graceful return to Wi-Fi, keeping saved Wi-Fi credentials, for recovering a stuck LoRaWAN unit.
+- **Hold 10 seconds**: full factory reset (wipe Wi-Fi, reopen setup). The OLED shows which action is pending while the button is held.
+
+A separate guard protects against stale cloud commands: the firmware ignores `provisionLoRa`, `factoryReset`, and `setMode` for the first 12 seconds after connecting to Losant, because a command delivered the instant a device connects is a stale replay, not a user action (§14.14, issue 17).
+
+## 14.13 Environment variables (LoRaWAN additions)
+
+In addition to the variables in §7.3, the LoRaWAN path uses:
+
+| Variable | Used by | Purpose |
+|----------|---------|---------|
+| `TTS_API_KEY` | provision-lorawan, lorawan-switch-wifi, register-gateway | TTS API key with device and gateway write rights |
+| `TTS_APP_ID` | provision-lorawan, lorawan-switch-wifi | the TTS application id (growthpulse) |
+| `TTS_CLUSTER` | same | operating cluster host, default nam1.cloud.thethings.network |
+| `TTS_IS_HOST` | provision-lorawan, register-gateway | Identity Server host, default eu1.cloud.thethings.network |
+| `TTS_USER_ID` | register-gateway | the TTS account that owns registered gateways |
+| `TTS_FREQ_PLAN` | provision-lorawan, register-gateway | default US_902_928_FSB_2 |
+| `LORAWAN_WEBHOOK_TOKEN` | lorawan-uplink | shared secret the TTS webhook sends as X-Webhook-Token |
+| `PROVISION_TOKEN` | provision-device | shared firmware token authenticating a board's self-provision |
+| `LOSANT_PROVISION_API_TOKEN` | provision-device | Losant token with device-create rights |
+
+## 14.14 Failure modes and how to read them
+
+The full chronological journal is in the LoRaWAN System and Debugging Report. The highest-value reference points:
+
+- **Join fails with -1116 (no join accept)**: either a sub-band mismatch (gateway on FSB1, TTS on FSB2) or DevNonce catch-up after a reflash (set `resets_join_nonces`).
+- **First uplink fails with -1101 (session not active)**: `activateOTAA` was never called; `beginOTAA` only sets keys.
+- **Downlink rejected with `no_device_session`**: it is aimed at a TTS device the node never joined, an orphan from non-idempotent provisioning.
+- **App card stuck on Wi-Fi and the TTS webhook auto-deactivated**: Losant is rejecting the LoRaWAN state because the device lacks the `loraRssi`/`loraSnr` attributes; provision-device's schema sync fixes it on the next check-in.
+- **Node bounces between Wi-Fi and LoRaWAN**: a stale `provisionLoRa` or `factoryReset` command on reconnect (the 12-second grace) or a stale 0x00 downlink in the queue (the backend queue-clear).
+- **A TTS webhook showing "Healthy" with empty function logs** has likely been auto-deactivated for repeated failures; read its status banner.
+
+---
+
+# 15. Appendix
+
+## 15.1 Links
 
 | Resource | URL |
 |----------|-----|
@@ -938,26 +1105,46 @@ Every failure below was actually encountered during development. Symptoms are ex
 | CP210x USB driver | https://www.silabs.com/developer-tools/usb-to-uart-bridge-vcp-drivers |
 | Arduino IDE | https://www.arduino.cc/en/software |
 
-## 14.2 Project file inventory
+## 15.2 Project file inventory
 
 | Path | Contents |
 |------|----------|
 | `growthpulse-app/` | The web app and serverless functions (this repo deploys the product) |
-| `GP_Provisioning/GP_Provisioning.ino` | Unit firmware (kept out of public git) |
-| `growthpulse-simulator/simulator.mjs` | MQTT telemetry simulator |
-| `docs/GrowthPulse User Manual.(md/pdf)` | Customer-facing manual |
-| `docs/GrowthPulse Engineering Manual.(md/pdf)` | This document |
-| `docs/GrowthPulse Wiring Guide.md`, `docs/GrowthPulse Wiring Diagram.pdf` | Bench wiring references |
-| `docs/growthpulse-supabase-schema.sql` | Registry schema |
-| `docs/growthpulse-devices-schema.sql` | Ownership `devices` table + RLS policies |
+| **Firmware** | |
+| `firmware/GP_Combined/GP_Combined.ino` | Production image: one image, Wi-Fi or LoRaWAN by NVS flag (v4.2) |
+| `firmware/GP_Node/GP_Node.ino` | Wi-Fi-only self-provisioning image (reference) |
+| `firmware/GP_LoRaWAN/GP_LoRaWAN.ino` | Standalone LoRaWAN sketch (the proven OTAA reference) |
+| `firmware/GP_Provisioning/GP_Provisioning.ino` | Original captive-portal firmware (reference) |
+| **Serverless functions** | |
+| `netlify/functions/provision-device.js` | Wi-Fi self-provision: create/reuse Losant device, sync attributes |
+| `netlify/functions/provision-lorawan.js` | Idempotent LoRaWAN provisioning (one TTS device per board) |
+| `netlify/functions/lorawan-uplink.js` | TTS uplink webhook: decode bytes, route to Losant |
+| `netlify/functions/lorawan-switch-wifi.js` | Enqueue the 0x00 downlink to return a node to Wi-Fi |
+| `netlify/functions/register-gateway.js` | Auto-register a customer gateway on TTS |
+| `netlify/functions/device-state.js` | Read path the app polls (transport + signal aware) |
+| `netlify/functions/device-command.js` | Owner-verified cloud command (factory reset, etc.) |
 | `netlify/functions/device-history.js` | Time-series history for report graphs |
 | `netlify/functions/render-pdf.js` | Headless-Chrome vector PDF renderer |
-| `src/utils/accountExport.js` | Full report builder + three delivery paths |
-| `src/components/ExportSheet.jsx`, `src/components/SetLocationInline.jsx` | Report options sheet; inline location setter |
+| **Supabase schemas** | |
+| `docs/growthpulse-supabase-schema.sql` | Pairing-code registry |
+| `docs/growthpulse-devices-schema.sql` | Ownership `devices` table + RLS |
+| `docs/growthpulse-lorawan-routes-schema-v2.sql` | `lorawan_devices` route table (current) |
+| `docs/growthpulse-gateways-schema.sql` | Account-saved gateways |
+| **Documentation** | |
+| `docs/GrowthPulse User Manual.(md/pdf)` | Customer-facing manual |
+| `docs/GrowthPulse Engineering Manual.(md/pdf)` | This document |
+| `docs/GrowthPulse LoRaWAN System and Debugging Report.md` | Dual-transport architecture + full bug journal |
+| `docs/GrowthPulse LoRaWAN Bring-Up Guide.(md/pdf)` | One-time by-hand gateway + TTS setup |
+| `docs/GrowthPulse LoRaWAN Auto-Provision Setup.md` | Env vars + flow for automated provisioning |
+| `docs/GrowthPulse Gateway Auto-Register Setup.md` | Env vars + flow for gateway auto-registration |
+| `docs/GrowthPulse LoRaWAN Cleanup and Reset.md` | Operational reset runbook |
+| `docs/GrowthPulse Self-Provisioning Setup.(md/pdf)` | Wi-Fi self-provision setup |
+| `docs/GrowthPulse Wiring Guide.md`, `docs/GrowthPulse Wiring Diagram.pdf` | Bench wiring references |
 | `docs/GrowthPulse Product Roadmap.md`, `docs/GrowthPulse Deployment Model.md` | Product strategy docs |
+| `src/utils/accountExport.js` | Full report builder + three delivery paths |
 | `README.md` (repo) | Developer onboarding |
 
-## 14.3 Identifier reference (non-secret)
+## 15.3 Identifier reference (non-secret)
 
 | Identifier | Value |
 |------------|-------|

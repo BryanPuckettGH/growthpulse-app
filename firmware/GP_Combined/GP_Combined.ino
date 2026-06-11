@@ -1,5 +1,5 @@
 /* ============================================================
-   GrowthPulse Node Firmware  v4.0  (COMBINED Wi-Fi + LoRaWAN)
+   GrowthPulse Node Firmware  v4.2  (COMBINED Wi-Fi + LoRaWAN)
    ------------------------------------------------------------
    Board: Heltec WiFi LoRa 32 V3 (ESP32-S3 + Semtech SX1262)
 
@@ -74,7 +74,7 @@
 #define SX_MISO  11
 #define SX_MOSI  10
 
-#define FW_VERSION "4.0"
+#define FW_VERSION "4.2"
 #define WDT_TIMEOUT_S 60
 #define DIM_AFTER_MS (5UL * 60UL * 1000UL)
 #define SELFTEST_HOLD_MS 10000
@@ -84,7 +84,10 @@
 #define UPLINK_FPORT 2
 #define CMD_FPORT_SETMODE 11      // a downlink on this fPort flips the mode
 // 15 minutes is the production interval (TTN fair-use = 30s airtime/day).
-#define LORA_UPLINK_MS (15UL * 60UL * 1000UL)
+// 60s for responsive testing/demos (a downlink, e.g. switch-to-Wi-Fi, can only
+// reach a class-A node right after it uplinks). For production on TTN, raise this
+// toward ~15 min to stay within the fair-use airtime policy.
+#define LORA_UPLINK_MS (60UL * 1000UL)
 
 #define PAGE_MS 5000
 #define PAGE_COUNT 3
@@ -722,13 +725,10 @@ void lwSendReading() {
   } else if (rxState > 0) {
     Serial.printf("Uplink sent; downlink RX%d. RSSI=%d SNR=%.1f\n", rxState, loraRssi, loraSnr);
     // A 1-byte 0x00 downlink (sent on fPort 11) pulls the unit back to Wi-Fi.
-    // A 1-byte 0x00 = switch back to Wi-Fi. Ignore one that lands in the first
-    // 20s after joining: that's a stale queued downlink from an earlier session,
-    // not a deliberate switch (which always arrives during steady operation).
-    if (dlLen == 1 && dlBuf[0] == 0x00) {
-      if (millis() - loraJoinedAt > 20000) setModeAndReboot("wifi");
-      else Serial.println("Ignored stale switch-to-Wi-Fi downlink (just joined).");
-    }
+    // A 1-byte 0x00 = switch back to Wi-Fi. The backend clears any stale queued
+    // downlink when it provisions LoRaWAN, so any 0x00 we receive here is a real,
+    // deliberate switch -> act on it immediately.
+    if (dlLen == 1 && dlBuf[0] == 0x00) setModeAndReboot("wifi");
   } else {
     Serial.printf("Uplink error: %d\n", rxState);
   }

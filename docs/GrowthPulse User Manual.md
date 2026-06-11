@@ -34,14 +34,22 @@ Your unit's **pairing code** is also shown directly on the unit's built-in scree
 
 # Meet Your Device
 
-**The screen.** The built-in display walks you through setup and then shows your unit's pairing code in large letters, along with a small status indicator: **ON** means your unit is connected and streaming, two dots (..) mean it is still connecting.
+**The screen.** The built-in display walks you through setup and then cycles every few seconds through three pages so you always have the information you need at a glance:
 
-**The PRG button.** One button does everything:
+- **Pairing page**: your unit's pairing code in large letters, with a status indicator. **ON** means your unit is connected and streaming, two dots (..) mean it is still connecting.
+- **Connection page**: how the unit is connected right now (Wi-Fi or LoRaWAN), its signal strength, and its battery or power state.
+- **Readings page**: the latest live sensor values. A probe that is not plugged in reads "--" honestly rather than showing a fake number.
 
-- **Hold for 3 seconds** while the unit is running: forgets the saved Wi-Fi and reopens setup mode. Use this when you move to a new home, change your Wi-Fi password, or set the unit up somewhere new.
-- You never need this button for day-to-day use.
+**The PRG button.** One button does everything, and what it does depends on how you use it:
 
-**The USB-C port.** Power in. Plug it into any standard USB-C wall adapter.
+- **Single tap**: wakes the screen (or wakes the unit from sleep).
+- **Double tap**: puts the unit to sleep (a soft power-off). The screen turns off and the unit sips almost no power, so a battery can last for months. A single tap or the RESET button wakes it; it reconnects on its own.
+- **Hold 10 seconds**: full reset. The unit forgets its saved Wi-Fi and reopens setup mode. Use this when you move to a new home, change your Wi-Fi password, set the unit up somewhere new, or hand it to a new owner. The screen tells you when the reset is about to happen.
+- **Hold 3 seconds** (advanced): if a Farm Kit node is on LoRaWAN and you want to bring it back to your Wi-Fi, this returns it to Wi-Fi mode while keeping your saved network, so you do not have to set up Wi-Fi again.
+
+For day-to-day use you never need the button at all.
+
+**The USB-C port.** Power in. Plug it into any standard USB-C wall adapter. Battery-powered units also charge through this port.
 
 **The sensors.** Three sensors feed your dashboard: air temperature and humidity (the vented sensor), soil temperature (the metal probe), and soil moisture (the flat blade probe). Place the soil probes in the pot or bed you want to monitor, near the plant's root zone but not touching the stem.
 
@@ -78,7 +86,7 @@ Your GrowthPulse connects to the internet through your home Wi-Fi. It only needs
 - Setup mode stays open for 10 minutes. If it times out, the unit restarts and opens setup mode again.
 - Turning off cellular data during setup helps some phones show the setup page faster.
 
-**Changing Wi-Fi later** (new router, new password, new home): hold the **PRG button for 3 seconds**. The screen shows "Clearing Wi-Fi," the unit restarts into setup mode, and you repeat the steps above. Your account, plant data, and settings are not affected.
+**Changing Wi-Fi later** (new router, new password, new home): hold the **PRG button for 10 seconds**. The screen shows it is resetting, the unit restarts into setup mode, and you repeat the steps above. Your account, plant data, and settings are not affected, only the saved Wi-Fi is cleared so you can enter the new network.
 
 ---
 
@@ -155,9 +163,21 @@ The Devices tab lists every plant on your account.
 
 **Editing a device.** Tap the pencil on any card to rename the plant, set or change its home location, change its group, or switch how it connects (Wi-Fi or LoRaWAN gateway).
 
+**Switching how a node connects.** In the edit screen you can move a node between Wi-Fi and LoRaWAN, and the app does the whole setup for you. Switching a Wi-Fi node to LoRaWAN sets it up on your gateway behind the scenes and the node reboots and joins on its own, no codes to copy anywhere. Switching a LoRaWAN node back to Wi-Fi sends it a message that takes effect on its next check-in (LoRaWAN nodes check in every few minutes, so give it a minute or two), after which it rejoins your Wi-Fi. The plant stays the same plant on your dashboard the whole time; only the way it reaches the internet changes.
+
 **Removing a device.** In the edit screen's danger zone, "Remove from my account" takes the device off your account and deletes its history, journal photos, and alarms. The physical unit keeps working and can be paired again any time.
 
-**Selling or gifting a unit: Factory reset.** Also in the danger zone. This permanently deletes everything tied to the plant from your account, and if the unit is online, it remotely wipes its own Wi-Fi and reboots into setup mode, ready for its new owner to unbox a fresh experience. Read the confirmation carefully: this cannot be undone, and if you ever reconnect the unit you will be starting from scratch. (If the unit is offline at the time, the new owner can simply hold PRG for 3 seconds.)
+**Selling or gifting a unit: Factory reset.** Also in the danger zone. This permanently deletes everything tied to the plant from your account, and if the unit is online, it remotely wipes its own Wi-Fi and reboots into setup mode, ready for its new owner to unbox a fresh experience. Read the confirmation carefully: this cannot be undone, and if you ever reconnect the unit you will be starting from scratch. (If the unit is offline at the time, the new owner can simply hold PRG for 10 seconds to reset it.)
+
+---
+
+# Power, Battery, and Sleep
+
+Most units run on USB-C wall power and show **AC power** on their card. Battery-powered units (and the Farm Kit nodes) show a **battery percentage** with a charging indicator, and the card turns amber, then red, as the battery runs low, with a warning in the app before the unit goes offline.
+
+**Sleep (soft power-off).** You do not need to unplug a unit to turn it off. **Double-tap the PRG button** and the unit drops into deep sleep: the screen goes dark and it draws almost no power, so a battery can last for months between charges. It sends no readings while asleep. **A single tap or RESET wakes it**, and it reconnects to your Wi-Fi and account on its own.
+
+**Charging.** Plug a battery unit into USB-C to charge. The card shows a charging bolt while it is taking a charge. The percentage rises gently rather than jumping, so what you see tracks the real charge level.
 
 ---
 
@@ -166,9 +186,10 @@ The Devices tab lists every plant on your account.
 Wi-Fi works wonderfully indoors and around the house. For fields, large gardens, and far greenhouses, GrowthPulse offers **LoRaWAN**, long-range, low-power radio that reaches miles.
 
 - The **Farm Kit** includes a gateway, the one piece that connects to the internet (plug it into your router). Sensor nodes then join through the gateway automatically, no Wi-Fi setup per node at all.
-- Add the gateway in the app: Devices tab, **Add a LoRaWAN gateway**, enter the code on its label.
-- Buying more nodes later? Power them on within range and pair with the code on their screen, the gateway part is already done.
-- LoRaWAN nodes report every few minutes rather than every few seconds. That slower pace is what makes batteries last for months and signals reach for miles, perfect for plants, which do not change by the second.
+- **Add the gateway in the app**: Devices tab, **Add a LoRaWAN gateway**, then enter or scan the Gateway EUI from its label (the 16-character ID on the EUI line). The app registers the gateway on the network for you. You never log in to any network console.
+- **Buying more nodes later?** Power them on within range and pair with the code on their screen. Each node sets up its own identity automatically, and the gateway part is already done.
+- **Moving a plant between transports** is done entirely in the app from the device's edit screen (see "Switching how a node connects" under Devices). You never copy keys or codes anywhere.
+- LoRaWAN nodes report every few minutes rather than every few seconds. That slower pace is what makes batteries last for months and signals reach for miles, perfect for plants, which do not change by the second. Because of this slower check-in, a setting you change for a LoRaWAN node (like switching it back to Wi-Fi) takes effect on its next check-in, usually within a minute or two.
 
 ---
 
@@ -222,15 +243,18 @@ Great for plant sitters, garden clubs, agronomy classes, landlords, or just trac
 |---------|------------|
 | The setup page never opens after joining GrowthPulse-XXXXXX | Open a browser and go to 192.168.4.1. Also try turning off cellular data during setup. |
 | My phone says the GrowthPulse network has no internet | That is normal during setup. Choose "Keep trying Wi-Fi" or "Use this network anyway." |
-| The unit will not connect to my Wi-Fi | Make sure you picked the 2.4 GHz network and re-entered the password carefully. Hold PRG 3 seconds to start over. |
-| The screen shows two dots instead of ON | The unit is still connecting. If it stays that way, your Wi-Fi may be out of range or the password changed. Hold PRG 3 seconds to redo setup. |
+| The unit will not connect to my Wi-Fi | Make sure you picked the 2.4 GHz network and re-entered the password carefully. Hold PRG 10 seconds to start over. |
+| The screen shows two dots instead of ON | The unit is still connecting. If it stays that way, your Wi-Fi may be out of range or the password changed. Hold PRG 10 seconds to redo setup. |
 | A sensor shows "not connected" | That probe is not plugged in or its cable is loose. The Insights card names the exact sensor. Reseat the cable. |
 | The pairing code is rejected | Codes only contain letters and numbers, check for typos (the code is on the unit's screen). |
 | Readings look stuck | Check that the unit's screen shows ON. Pull the power and plug it back in, it reconnects by itself. |
-| I moved or changed my router | Hold PRG 3 seconds and run Wi-Fi setup again. Nothing else changes. |
+| I moved or changed my router | Hold PRG 10 seconds and run Wi-Fi setup again. Nothing else changes. |
 | Download PDF seems slow the first time | The high-quality renderer wakes up on the first use, then is quick. The loading spinner means it's working, just wait; it will save automatically. |
 | Print report does not open | Your browser blocked the pop-up. Allow pop-ups for growthpulsecloud.com once, or use Download PDF instead. |
 | I want rain delay but the switch is off | Rain delay needs the plant's location for the forecast. The switch shows a box to add a city or ZIP; once saved, it turns on. |
+| The screen is dark and the unit seems off | It is probably asleep (a double-tap of PRG puts it to sleep). Tap PRG once or press RESET to wake it; it reconnects on its own. |
+| I switched a node to Wi-Fi in the app but it is still on LoRaWAN | LoRaWAN nodes only act on a change at their next check-in, which is every minute or two. Give it a couple of minutes; it will switch and rejoin Wi-Fi on its own. |
+| A battery unit shows a percentage that seems stuck right after plugging in | The percentage rises gently on purpose so it tracks the real charge instead of jumping. It will keep climbing while charging. |
 
 ---
 
@@ -250,16 +274,24 @@ Great for plant sitters, garden clubs, agronomy classes, landlords, or just trac
 
 **What happens to my data if I remove a device?** Its history, journal, photos, and alarms are deleted from your account immediately.
 
+**Can I move a plant from Wi-Fi to LoRaWAN, or back, later?** Yes, any time, from the device's edit screen. The app handles the setup for you and the plant stays the same plant on your dashboard. A switch back to Wi-Fi takes effect on the node's next LoRaWAN check-in (a minute or two), because LoRaWAN nodes only listen briefly between their scheduled reports.
+
+**How do I turn a unit off?** Double-tap the PRG button to put it to sleep (a soft power-off that sips almost no power). Tap once or press RESET to wake it. There is no need to unplug it.
+
+**Do I have to set anything up on a LoRaWAN network?** No. Adding a gateway and switching nodes to LoRaWAN are done entirely in the GrowthPulse app. You never log in to any network console or copy any keys.
+
 ---
 
 # Specifications
 
 | Item | Specification |
 |------|---------------|
-| Power | 5V USB-C, under 2.5W typical |
+| Power | 5V USB-C, under 2.5W typical; optional rechargeable battery on Farm Kit nodes |
+| Battery life | Months per charge on LoRaWAN nodes (low-power reporting, sleep between reads) |
 | Wi-Fi | 2.4 GHz, 802.11 b/g/n |
-| Long range option | LoRaWAN, US 915 MHz, via Farm Kit gateway |
-| Display | Built-in OLED, shows setup help, pairing code, status |
+| Long range option | LoRaWAN, US 915 MHz (FSB2), via Farm Kit gateway |
+| Power button | Single tap wake, double tap sleep, 10-second hold to reset Wi-Fi |
+| Display | Built-in OLED, rotating pairing code, connection, and live readings |
 | Air sensor | Temperature and relative humidity |
 | Soil temperature | Waterproof probe |
 | Soil moisture | Capacitive (corrosion-resistant, no exposed metal contacts) |
