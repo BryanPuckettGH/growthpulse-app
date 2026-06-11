@@ -8,6 +8,13 @@ import { X } from 'lucide-react';
 // gracefully when the camera isn't available so the user can always type.
 export default function QrScanner({ onResult, onClose }) {
   const videoRef = useRef(null);
+  // Keep the latest onResult in a ref so the camera effect can run ONCE on mount
+  // and never restart when the parent re-renders (the live-polling loop re-renders
+  // the Devices view every few seconds; depending on onResult tore the camera
+  // down and back up each time, which looked like "won't open / won't scan").
+  const onResultRef = useRef(onResult);
+  onResultRef.current = onResult;
+
   const [err, setErr] = useState('');
   const [note, setNote] = useState('Point the camera at the QR code on the gateway label.');
 
@@ -35,7 +42,10 @@ export default function QrScanner({ onResult, onClose }) {
         return;
       }
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' } },
+          audio: false,
+        });
       } catch (e) {
         setErr(e && e.name === 'NotAllowedError'
           ? 'Camera permission is blocked. Allow it in your browser, or type the EUI instead.'
@@ -45,8 +55,14 @@ export default function QrScanner({ onResult, onClose }) {
       if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
 
       const v = videoRef.current;
+      if (!v) { stream.getTracks().forEach((t) => t.stop()); return; }
       v.srcObject = stream;
-      try { await v.play(); } catch { /* autoplay quirks; the frame loop still runs */ }
+      // Some browsers (notably iOS Safari) reject play() outside the original
+      // user gesture; retry on metadata load and ignore the rejection, the frame
+      // loop still runs once frames are flowing.
+      const tryPlay = () => { const p = v.play(); if (p && p.catch) p.catch(() => {}); };
+      v.onloadedmetadata = tryPlay;
+      tryPlay();
 
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d', { willReadFrequently: true });
@@ -61,7 +77,7 @@ export default function QrScanner({ onResult, onClose }) {
           const code = jsQR(img.data, img.width, img.height, { inversionAttempts: 'attemptBoth' });
           if (code && code.data) {
             const eui = euiFromText(code.data);
-            if (eui) { stop(); onResult(eui); return; }
+            if (eui) { stop(); onResultRef.current(eui); return; }
             setNote('Found a code, but no Gateway EUI in it. Make sure it’s the label QR, or type the EUI.');
           }
         }
@@ -71,7 +87,7 @@ export default function QrScanner({ onResult, onClose }) {
     })();
 
     return stop;
-  }, [onResult]);
+  }, []); // run once on mount; never restart on parent re-renders
 
   return (
     <div className="overlay" style={{ alignItems: 'center' }} onClick={onClose}>
@@ -86,7 +102,7 @@ export default function QrScanner({ onResult, onClose }) {
         ) : (
           <>
             <div className="qrframe">
-              <video ref={videoRef} playsInline muted />
+              <video ref={videoRef} autoPlay playsInline muted />
               <div className="qrframe__reticle" />
             </div>
             <p className="muted center" style={{ marginTop: 10 }}>{note}</p>

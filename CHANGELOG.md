@@ -6,6 +6,9 @@ All notable changes to GrowthPulse, the web app and the device firmware.
 
 ## Web App
 
+### v2.22.1 - June 12, 2026
+- Fixed the gateway QR scanner that sometimes would not open or would not scan. The scanner effect depended on its `onResult` callback, which the Devices view recreated on every render (and it re-renders every few seconds from the live-polling loop), so the camera was torn down and restarted constantly and never got a stable moment to decode. The effect now runs once on mount and reads the latest callback through a ref. Also added `autoPlay` to the video and a metadata-load play retry so frames flow reliably (notably on iOS Safari, where `play()` can be rejected outside the original tap).
+
 ### v2.22.0 - June 11, 2026
 - Fixed the root cause of LoRaWAN data never reaching the app: Losant rejects an entire state report that includes an attribute the device doesn't define, so devices created before the `loraRssi`/`loraSnr`/`transport` attributes existed silently dropped every LoRaWAN uplink (Wi-Fi state, which has no LoRa fields, still worked). The repeated 502s caused The Things Stack to auto-deactivate the uplink webhook. `provision-device` now syncs the full attribute schema on every provision (not just on create), so existing devices self-heal on their next check-in.
 - `lorawan-uplink` now logs the exact outcome of each delivery (resolved device, 200/401/404/422/502 + Losant's rejection detail) to make webhook failures diagnosable in the Netlify function log.
