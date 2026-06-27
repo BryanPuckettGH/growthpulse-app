@@ -6,9 +6,11 @@ Your job: get a node running on LoRaWAN through your own gateway and see it live
 
 ### Getting the firmware (always grab the newest)
 
-The combined Wi-Fi + LoRaWAN firmware lives in the repo at `firmware/GP_Combined/GP_Combined.ino` on `main`. Pull or download the newest before flashing (Bryan can send you the file if you don't have repo access). Install these in the Arduino Library Manager: **RadioLib** and **Heltec ESP32 LoRa V3** (by ropg). Board: **Heltec WiFi LoRa 32 V3**, upload speed 115200.
+The combined Wi-Fi + LoRaWAN firmware lives in the repo at `firmware/GP_Combined/GP_Combined.ino` on `main`. Pull or download the newest before flashing. Install these in the Arduino Library Manager: **RadioLib** and **Heltec ESP32 LoRa V3** (by ropg). Board: **Heltec WiFi LoRa 32 V3**, upload speed 115200.
 
-There are no keys to fill in. The same firmware runs both Wi-Fi and LoRaWAN; the app pushes the LoRaWAN keys to the board when you switch it over.
+**Important, the provisioning token.** The copy in the repo ships with a *placeholder* `PROVISION_TOKEN`, on purpose, so the real secret is never public on GitHub. It is the `#define PROVISION_TOKEN "REPLACE-WITH-SHARED-FIRMWARE-TOKEN"` line (near line 132). A board flashed with the placeholder connects to Wi-Fi but cannot register to the cloud: the OLED loops on "Setup retry / check internet" and the node never appears in the app. To get a working node, either flash the build Bryan sends you (it already has the real token) or paste the real token Bryan gives you into that line, then flash.
+
+You do not fill in any LoRaWAN keys; the app pushes those to the board when you switch it to LoRaWAN.
 
 ---
 
