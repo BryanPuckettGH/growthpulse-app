@@ -64,6 +64,15 @@
 #define SOIL_PIN 2
 #define RESET_BTN 0               // PRG button (GPIO0)
 
+// ----------------- Irrigation valve driver (TB6612FNG H-bridge) -----------------
+// Galcon S1602 latching solenoid: a brief pulse of one polarity opens it, the
+// reverse closes it, and it holds its state with no current. Tie the TB6612FNG
+// STBY and PWMA pins HIGH (3.3V); the firmware only toggles the two direction lines.
+#define VALVE_IN1 33
+#define VALVE_IN2 34
+#define VALVE_PULSE_MS 60         // latch pulse length (ms)
+#define VALVE_MAX_OPEN_MS 60000   // safety: auto-close if left open this long
+
 // ----------------- SX1262 radio pins (Heltec V3) -----------------
 // These are the make-or-break numbers from the V3 schematic.
 #define SX_NSS   8
@@ -113,6 +122,8 @@ float battVSmooth = -1;
 // which otherwise bounce the unit Wi-Fi<->LoRaWAN or wipe Wi-Fi on every connect.
 unsigned long losantConnectedAt = 0;
 const unsigned long CMD_GRACE_MS = 12000;
+// Irrigation valve: 0 = closed; otherwise millis() when opened (for the auto-close watchdog).
+unsigned long valveOpenedAt = 0;
 
 // ----------------- On-board OLED (Heltec V3) -----------------
 #define VEXT_PIN 36
@@ -120,7 +131,7 @@ const unsigned long CMD_GRACE_MS = 12000;
 #define OLED_SCL 18
 #define OLED_RST 21
 U8G2_SSD1306_128X64_NONAME_F_HW_I2C oled(U8G2_R0, OLED_RST, OLED_SCL, OLED_SDA);
-void oledMessage(const char* l1, const char* l2);   // forward decl (used before its definition below)
+void oledMessage(const char* l1, const char* l2);   // forward decls (used before their definitions below)
 void handleButton();
 
 // ----------------- Soil calibration -----------------
@@ -129,7 +140,7 @@ int wetValue = 1300;
 
 // ----------------- Self-provisioning (Wi-Fi mode) -----------------
 #define PROVISION_URL   "https://growthpulsecloud.com/.netlify/functions/provision-device"
-#define PROVISION_TOKEN "REPLACE-WITH-SHARED-FIRMWARE-TOKEN"   // == Netlify env PROVISION_TOKEN
+#define PROVISION_TOKEN "84b0afba6b3884a63859016463b2a6e86aeffe33027b8b3e"   // == Netlify env PROVISION_TOKEN
 
 String losantDeviceId, losantAccessKey, losantAccessSecret;
 Preferences nvs;
@@ -529,6 +540,19 @@ void connectWiFi() {
   pagePairCode(false);
 }
 
+// Pulse the latching irrigation valve. open=true drives the open polarity,
+// open=false the close polarity, for VALVE_PULSE_MS, then releases both lines
+// (the coil holds its state with no current). Records open time for the watchdog.
+void pulseValve(bool open) {
+  digitalWrite(VALVE_IN1, open ? HIGH : LOW);
+  digitalWrite(VALVE_IN2, open ? LOW  : HIGH);
+  delay(VALVE_PULSE_MS);
+  digitalWrite(VALVE_IN1, LOW);
+  digitalWrite(VALVE_IN2, LOW);
+  valveOpenedAt = open ? millis() : 0;
+  Serial.print("Valve "); Serial.println(open ? "OPEN" : "CLOSED");
+}
+
 void handleCommand(LosantCommand *command) {
   Serial.print("Cloud command: "); Serial.println(command->name);
   // Ignore the destructive/mode-changing commands if they arrive in the first
@@ -571,6 +595,12 @@ void handleCommand(LosantCommand *command) {
     } else {
       Serial.println("provisionLoRa: bad/short keys, ignoring.");
     }
+  } else if (strcmp(command->name, "setValve") == 0) {
+    // Payload { "open": true|false }. The latching solenoid holds with no power,
+    // so we just pulse it. (Left out of the grace-window ignore: the app always
+    // sends "close" last, so a redelivered command is a harmless re-close.)
+    bool open = (*command->payload)["open"].as<bool>();
+    pulseValve(open);
   }
 }
 
@@ -796,6 +826,8 @@ void setup() {
   Serial.begin(115200);
   analogReadResolution(12);
   pinMode(RESET_BTN, INPUT_PULLUP);
+  pinMode(VALVE_IN1, OUTPUT); digitalWrite(VALVE_IN1, LOW);
+  pinMode(VALVE_IN2, OUTPUT); digitalWrite(VALVE_IN2, LOW);
   delay(1000);
 
   bool wokeFromSleep = (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT1);
@@ -845,7 +877,7 @@ void setup() {
       Serial.println("Join failed; retry in 30s. Press PRG-hold 3s to recover to Wi-Fi.");
       // keep the button responsive during the wait
       unsigned long w = millis();
-      while (millis() - w < 10000) { handleButton(); delay(20); esp_task_wdt_reset(); }
+      while (millis() - w < 30000) { handleButton(); delay(20); esp_task_wdt_reset(); }
     }
   } else {
     Serial.println("=== GrowthPulse (Wi-Fi mode) ===");
@@ -901,6 +933,11 @@ void loopLoRaWAN() {
 
 void loop() {
   esp_task_wdt_reset();
+  // Safety: if the valve was left open (e.g., a close command was lost), close it.
+  if (valveOpenedAt && (millis() - valveOpenedAt) > VALVE_MAX_OPEN_MS) {
+    Serial.println("Valve auto-close (max open reached)");
+    pulseValve(false);
+  }
   if (netMode == "lorawan") loopLoRaWAN();
   else                      loopWiFi();
 }

@@ -100,7 +100,7 @@ int wetValue = 1300;
 // provisioning endpoint and receives its own Losant device id + access key,
 // which it stores in NVS. No per-board secrets live in this file.
 #define PROVISION_URL   "https://growthpulsecloud.com/.netlify/functions/provision-device"
-#define PROVISION_TOKEN "REPLACE-WITH-SHARED-FIRMWARE-TOKEN"   // == Netlify env PROVISION_TOKEN
+#define PROVISION_TOKEN "84b0afba6b3884a63859016463b2a6e86aeffe33027b8b3e"   // == Netlify env PROVISION_TOKEN
 
 // Filled in at runtime from NVS (or from a fresh provision on first boot).
 String losantDeviceId, losantAccessKey, losantAccessSecret;
