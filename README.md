@@ -47,24 +47,32 @@ Both transports write to the **same Losant device**, so a node is one plant in t
 
 ## Documentation (in `docs/`)
 
+The documentation is a four-manual controlled set (June 2026 edition, with embedded wiring and architecture diagrams):
+
 | Document | What it covers |
 |----------|----------------|
+| [Engineering Manual (PDF)](docs/GrowthPulse%20Engineering%20Manual.pdf) | The development record: full architecture, every design decision and why, the complete 24-issue debugging journal, decision log, and roadmap |
+| [Technical Reference Manual (PDF)](docs/GrowthPulse%20Technical%20Reference%20Manual.pdf) | The current-state spec: GPIO map, firmware constants and NVS keys, telemetry/payload/command specs, all nine function APIs, database schemas, TTS and Losant reference, app constants, plant ranges |
+| [Operations Manual (PDF)](docs/GrowthPulse%20Operations%20Manual.pdf) | Procedures and runbooks: toolchain setup, flashing, wiring and calibration, deploys, gateway bring-up, console operations, recovery runbooks, and the full troubleshooting catalog |
 | [User Manual (PDF)](docs/GrowthPulse%20User%20Manual.pdf) | Customer-facing: setup, Wi-Fi pairing, LoRaWAN, the button, every app feature, troubleshooting, FAQ, specs |
-| [Engineering Manual (PDF)](docs/GrowthPulse%20Engineering%20Manual.pdf) | Deep dive: hardware, firmware, cloud, backend, app architecture, and the new dual-transport section (14) |
-| [LoRaWAN System and Debugging Report](docs/GrowthPulse%20LoRaWAN%20System%20and%20Debugging%20Report.md) | Dual-transport architecture and a complete journal of every LoRaWAN issue, root cause, and fix |
-| [LoRaWAN Bring-Up Guide (PDF)](docs/GrowthPulse%20LoRaWAN%20Bring-Up%20Guide.pdf) | One-time by-hand gateway and The Things Stack setup |
-| [LoRaWAN Auto-Provision Setup](docs/GrowthPulse%20LoRaWAN%20Auto-Provision%20Setup.md) + [Gateway Auto-Register Setup](docs/GrowthPulse%20Gateway%20Auto-Register%20Setup.md) | Env vars and flow for the automated LoRaWAN paths |
-| [LoRaWAN Cleanup and Reset](docs/GrowthPulse%20LoRaWAN%20Cleanup%20and%20Reset.md) | Operational reset runbook |
-| [Wiring Guide (PDF)](docs/GrowthPulse%20Wiring%20Guide.pdf) + [Wiring Diagram (PDF)](docs/GrowthPulse%20Wiring%20Diagram.pdf) | Bench wiring, pin by pin |
+
+Supporting documents:
+
+| Document | What it covers |
+|----------|----------------|
+| [LoRaWAN System and Debugging Report](docs/GrowthPulse%20LoRaWAN%20System%20and%20Debugging%20Report.md) | The chronological LoRaWAN bring-up journal (the Engineering Manual carries the consolidated record) |
+| [LoRaWAN Bring-Up Guide (PDF)](docs/GrowthPulse%20LoRaWAN%20Bring-Up%20Guide.pdf) | Sourced external reference for gateway and The Things Stack setup (procedures now consolidated in the Operations Manual) |
 | [Product Roadmap (PDF)](docs/GrowthPulse%20Product%20Roadmap.pdf) + [Deployment Model (PDF)](docs/GrowthPulse%20Deployment%20Model.pdf) | Product strategy |
 | Supabase schemas | `growthpulse-supabase-schema.sql` (registry), `growthpulse-devices-schema.sql` (ownership), `growthpulse-lorawan-routes-schema-v2.sql` (LoRaWAN routing), `growthpulse-gateways-schema.sql` (gateways) |
+
+The older standalone guides (Wiring Guide, Teammate and Web App Checklists, Auto-Provision and Gateway Auto-Register setups, Cleanup and Reset) are superseded by the Operations Manual and remain in `docs/` for history. Diagram sources live in `docs/assets/`.
 
 Markdown versions of the manuals sit next to the PDFs so they stay editable.
 Version history for the app and firmware: [CHANGELOG.md](CHANGELOG.md).
 
 ## Firmware (in `firmware/`)
 
-`firmware/GP_Combined/GP_Combined.ino` (v4.2) is the **production image** for the Heltec WiFi LoRa 32 V3. One identical image runs either Wi-Fi or LoRaWAN, chosen by a saved flag in flash (NVS), with **no per-board secrets**:
+`firmware/GP_Combined/GP_Combined.ino` (v4.3) is the **production image** for the Heltec WiFi LoRa 32 V3. One identical image runs either Wi-Fi or LoRaWAN, chosen by a saved flag in flash (NVS), with **no per-board secrets**:
 
 - **Wi-Fi**: branded captive-portal setup, self-provisioning, MQTT telemetry to Losant.
 - **LoRaWAN**: load OTAA keys from flash, join any gateway, uplink a 9-byte payload.
@@ -74,10 +82,10 @@ Reference images also live in `firmware/`: `GP_Node` (Wi-Fi-only self-provisioni
 
 To run the combined image on your own board:
 
-1. Follow chapter 2 of the Engineering Manual: Arduino IDE, the CP210x USB driver, the ESP32 board package, board "Heltec WiFi LoRa 32(V3)", and the listed libraries (including RadioLib for the SX1262).
+1. Follow chapter 2 of the Operations Manual: Arduino IDE, the CP210x USB driver, the ESP32 board package, board "Heltec WiFi LoRa 32(V3)", and the listed libraries (including RadioLib for the SX1262).
 2. Set **Tools > Partition Scheme** to a larger-app / "Huge App" layout (the combined image is large).
 3. Replace the placeholder `PROVISION_TOKEN` with your real shared firmware token (and set the same value as the Netlify `PROVISION_TOKEN`). Never commit the real value.
-4. Wire sensors per the Wiring Guide, flash, and pair using the code on the OLED.
+4. Wire sensors per the Operations Manual's wiring diagram and bench procedure, flash, and pair using the code on the OLED.
 
 ## Local development
 
