@@ -500,19 +500,50 @@ export function AppProvider({ children }) {
     }));
   }, [syncDevice]);
   const runPump = useCallback((id, seconds = 5) => {
-    setDevices((ds) => ds.map((d) => (d.id === id ? { ...d, pumpRunning: true } : d)));
-    setTimeout(() => {
-      setDevices((ds) => ds.map((d) => {
-        if (d.id !== id) return d;
-        const reading = {
-          ...d.reading,
-          soilRaw: Math.max(1300, d.reading.soilRaw - 600),
-          soilMoisturePercent: Math.min(100, d.reading.soilMoisturePercent + 25),
-        };
-        return { ...d, pumpRunning: false, reading };
-      }));
-    }, Math.min(seconds, 6) * 1000);
-  }, []);
+    const dur = Math.max(1, Math.min(Number(seconds) || 5, 30));
+    const d = devicesRef.current.find((x) => x.id === id);
+    // Optimistic UI: show it running right away.
+    setDevices((ds) => ds.map((x) => (x.id === id ? { ...x, pumpRunning: true } : x)));
+
+    // Demo devices (or anything without a real cloud id) just simulate the effect;
+    // the real sensor reports the moisture change on a live node.
+    if (isDemo || !d || !d.losantDeviceId) {
+      setTimeout(() => {
+        setDevices((ds) => ds.map((x) => {
+          if (x.id !== id) return x;
+          const reading = {
+            ...x.reading,
+            soilRaw: Math.max(1300, x.reading.soilRaw - 600),
+            soilMoisturePercent: Math.min(100, x.reading.soilMoisturePercent + 25),
+          };
+          return { ...x, pumpRunning: false, reading };
+        }));
+      }, Math.min(dur, 6) * 1000);
+      return;
+    }
+
+    // Real device: open the latching valve now, then close it after `dur` seconds.
+    // The signed-in session rides along so the backend can verify ownership.
+    (async () => {
+      let headers = { 'Content-Type': 'application/json' };
+      try {
+        if (supabase) {
+          const { data: sess } = await supabase.auth.getSession();
+          if (sess && sess.session) headers = { ...headers, Authorization: `Bearer ${sess.session.access_token}` };
+        }
+        const cmd = (open) =>
+          fetch(`/.netlify/functions/device-command?deviceId=${encodeURIComponent(d.losantDeviceId)}&name=setValve&open=${open}`, { method: 'POST', headers });
+        await cmd(true);
+        setTimeout(async () => {
+          try { await cmd(false); } catch { /* firmware also auto-closes via its watchdog */ }
+          setDevices((ds) => ds.map((x) => (x.id === id ? { ...x, pumpRunning: false } : x)));
+        }, dur * 1000);
+      } catch {
+        // Couldn't reach the backend: clear the running state so the UI doesn't hang.
+        setDevices((ds) => ds.map((x) => (x.id === id ? { ...x, pumpRunning: false } : x)));
+      }
+    })();
+  }, [isDemo]);
 
   // LoRaWAN gateways: the one piece of Farm Kit hardware that touches the
   // internet. Nodes join through them automatically; the app just tracks them.
