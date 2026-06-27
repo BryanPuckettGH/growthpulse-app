@@ -19,9 +19,11 @@ export const handler = async (event) => {
     return { statusCode: 400, body: JSON.stringify({ error: 'deviceId required' }) };
   }
   // Only allow the commands we actually support.
-  if (name !== 'factoryReset') {
+  if (name !== 'factoryReset' && name !== 'setValve') {
     return { statusCode: 400, body: JSON.stringify({ error: 'Unsupported command' }) };
   }
+  // setValve carries an open/close flag as ?open=true|false; everything else has no payload.
+  const payload = name === 'setValve' ? { open: params.open === 'true' } : {};
 
   // Ownership check: the caller's Supabase session is forwarded to the
   // devices table, where row-level security only returns rows the caller
@@ -53,7 +55,7 @@ export const handler = async (event) => {
       {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, payload: {} }),
+        body: JSON.stringify({ name, payload }),
       }
     );
     if (!res.ok) {
