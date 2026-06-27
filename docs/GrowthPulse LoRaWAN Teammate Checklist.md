@@ -1,93 +1,56 @@
-# GrowthPulse LoRaWAN Setup — Teammate Checklist
+# GrowthPulse LoRaWAN Setup: Teammate Checklist
 
-Your job: get the node talking to The Things Stack through the gateway, and confirm real sensor data shows up in the TTS console. You can do all of this on your own free account, you do NOT need Bryan's GitHub or Netlify. The full reference (with troubleshooting) is **GrowthPulse LoRaWAN Bring-Up Guide.pdf**; this is the short version.
+Your job: get a node running on LoRaWAN through your own gateway and see it live in the app. The app does almost all of it now. You do NOT create anything in The Things Stack by hand, you do NOT generate or paste keys, and there is nothing to send Bryan at the end. The app auto-provisions the node's TTS device and routes its data for you.
 
-**You need:** your own LoRaWAN gateway (e.g. a ThinkNode G1), a Heltec WiFi LoRa 32 V3 node, a USB-C cable, the Arduino IDE, and the latest **GP_LoRaWAN.ino** firmware (see "Getting the firmware" below).
+**You need:** your own LoRaWAN gateway (e.g. a ThinkNode G1), a Heltec WiFi LoRa 32 V3 node, a USB-C cable, the Arduino IDE, and the latest **GP_Combined.ino** firmware.
 
 ### Getting the firmware (always grab the newest)
 
-The node firmware lives in GitHub, so you always pull the current version:
+The combined Wi-Fi + LoRaWAN firmware lives in the repo at `firmware/GP_Combined/GP_Combined.ino` on `main`. Pull or download the newest before flashing (Bryan can send you the file if you don't have repo access). Install these in the Arduino Library Manager: **RadioLib** and **Heltec ESP32 LoRa V3** (by ropg). Board: **Heltec WiFi LoRa 32 V3**, upload speed 115200.
 
-1. Clone the repo (you have collaborator access): `git clone https://github.com/BryanPuckettGH/growthpulse-app.git`
-2. Switch to the LoRaWAN branch: `git checkout lorawan-bringup` (or `main` once it's merged).
-3. Open `firmware/GP_LoRaWAN/GP_LoRaWAN.ino`.
-
-Prefer the browser? On github.com open the repo, switch the branch dropdown to **lorawan-bringup**, go to `firmware/GP_LoRaWAN/GP_LoRaWAN.ino`, and use **Download raw file**. Always re-pull / re-download before flashing so you have the newest firmware.
-
-**Two things to send Bryan at the end** (this is how your half connects to the app):
-1. The **device ID** of the end device you create in TTS (step 4).
-2. Agree on a **webhook secret token** (any long random string). You'll paste it into the TTS webhook; Bryan puts the same string in Netlify.
+There are no keys to fill in. The same firmware runs both Wi-Fi and LoRaWAN; the app pushes the LoRaWAN keys to the board when you switch it over.
 
 ---
 
-## 1. Create your account + register the gateway
+## 1. Flash the node and bring it up on Wi-Fi first
 
-1. Go to **https://nam1.cloud.thethings.network/console** (North America cluster). Sign up / log in (login is via eu1, that's normal; you still manage everything on nam1).
-2. **Gateways → + Register gateway.**
-3. **Gateway EUI:** the 16-hex-character EUI printed on **your own** gateway's label (the `EUI:` line, format `XX:XX:XX:FF:FE:XX:XX:XX`). Use the gateway you physically have, not anyone else's. → Confirm.
-4. **Frequency plan:** **United States 902-928 MHz, FSB 2 (used by TTN)**. (This is sub-band 2, mandatory.)
-5. **Register gateway.**
+1. Flash **GP_Combined.ino**. The board boots into Wi-Fi setup mode.
+2. Claim the node in the app like any node (connect to its setup Wi-Fi, give it your Wi-Fi, add it to your account).
+3. Confirm sensor data shows up in the app over Wi-Fi. The node fully works at this point. LoRaWAN is the optional switch below, so do it only once Wi-Fi is proven.
 
-## 2. Point the ThinkNode G1 at The Things Stack
+## 2. Point your gateway at The Things Stack (the one thing the app can't do)
+
+The app registers the gateway on the network for you, but it can't reach inside the physical gateway to configure it. So set the G1 to forward to our server once.
 
 In the G1's web UI (join its Wi-Fi AP or LAN, browse to `192.168.1.1`, login `root` / `root`):
-1. **LoRaWAN → LoRa Gateway**, set **Mode = Packet Forward**.
-2. **Server Address:** `nam1.cloud.thethings.network`  **Port Up/Down:** `1700` / `1700`.
+1. **LoRaWAN -> LoRa Gateway**, set **Mode = Packet Forward**.
+2. **Server Address:** `nam1.cloud.thethings.network`   **Port Up/Down:** `1700` / `1700`.
 3. **Channel Plan:** **US915** (sub-band 2).
-4. **Save & Apply**, restart the gateway.
-5. Back in the TTS console, open the gateway → it should say **Connected**, and **Live data** should show traffic.
+4. **Save & Apply**, then restart the gateway.
 
-## 3. Create the application
+## 3. Add the gateway in the app
 
-**Applications → + Create application** → Application ID `growthpulse` → Create.
+**Devices -> Add gateway**, then scan or type the **Gateway EUI** from your gateway's label (the `EUI:` line, format `XX:XX:XX:FF:FE:XX:XX:XX`). The app registers it on The Things Stack automatically and ties it to your account. Within a minute or two the gateway should come up as connected. You never log into the TTS console.
 
-## 4. Register the node (end device, OTAA)
+## 4. Switch the node to LoRaWAN
 
-**End devices → + Register end device → Enter end device specifics manually:**
-- **Frequency plan:** United States 902-928 MHz, **FSB 2** (must match the gateway).
-- **LoRaWAN version:** **MAC 1.0.4**.   **Regional Parameters:** **RP002 1.0.4**.
-- **Activation mode:** **OTAA**.
-- **JoinEUI / AppEUI:** all zeros `0000000000000000`.
-- **DevEUI:** click **Generate**.
-- **AppKey:** click **Generate**.
-- **End device ID:** note this down — **this is the device ID you send Bryan.**
-- **Register end device.**
+In the app, open the node and switch its connection to **LoRaWAN**. Behind the scenes the app:
+- generates fresh OTAA keys and creates the node's TTS device for you,
+- stores the route so the node's data lands on the same plant it used over Wi-Fi,
+- pushes the keys to the board, which reboots into LoRaWAN and joins through your gateway.
 
-Then open the device → **General settings → Join settings → enable "Resets join nonces"** (lets you reflash during testing without join errors).
+The board must be **online over Wi-Fi** when you flip the switch (that is how it receives the keys). If it's offline the switch just queues until it next connects.
 
-## 5. Flash the node and prove the join
+## 5. Confirm it's live
 
-1. Open **GP_LoRaWAN.ino** in Arduino IDE. Install libraries (Library Manager): **RadioLib**, **Heltec ESP32 LoRa V3** (by ropg).
-2. Fill in from your TTS device page (Console shows them, with a "copy" and an MSB-first toggle):
-   - `devEUI` = your generated DevEUI
-   - `appKey[16]` and `nwkKey[16]` = your generated AppKey (same value in both)
-   - leave `joinEUI = 0`
-3. Board: **Heltec WiFi LoRa 32 V3**. Upload speed 115200. Flash it.
-4. Open Serial Monitor at 115200. You want to see **"LoRaWAN: JOINED."** then **"Uplink sent."**
-5. In the TTS console, open the **device → Live data**. You should see the **join-accept**, then **uplinks** arriving every ~60 seconds.
-
-## 6. Add the payload decoder (so the bytes become real numbers)
-
-**Application → Payload formatters → Uplink → Custom JavaScript**, paste the decoder from the Bring-Up Guide §5b (the `decodeUplink` function). Save. Now the device Live data shows `soilTemperatureF`, `airTemperatureF`, `airHumidity`, `soilRaw`, `soilMoisturePercent` decoded.
-
-## 7. Set up the webhook (connects to the app — needs Bryan's side too)
-
-**Application → Integrations → Webhooks → + Add webhook → Custom webhook:**
-- **Format:** JSON
-- **Base URL:** `https://growthpulsecloud.com/.netlify/functions/lorawan-uplink`
-- **Uplink message** path: `/`
-- **Add header:** name `X-Webhook-Token`, value = the **secret token** you agreed with Bryan.
-- Create it.
-
-This will show errors until Bryan deploys his side and sets the matching token, that's expected. Your job is done when the **device Live data shows decoded uplinks** (step 6). The app showing the data is Bryan's half.
+The node should reappear in the app within a couple of minutes, now tagged **LoRaWAN**, with readings updating roughly every 60 seconds. That's it. No device IDs, tokens, decoders, or webhooks to set up.
 
 ---
 
-## Quick troubleshooting (full table in the Bring-Up Guide §9)
+## Quick troubleshooting
 
-- `radio.begin()` error -707 → TCXO; make sure you used the ropg Heltec library.
-- Nothing in **gateway** Live data → sub-band wrong, or node and gateway too close (put them 5-10 m apart with a wall).
-- Join request in **gateway** Live data but not **device** Live data → DevEUI/JoinEUI/AppKey don't match what you flashed.
-- Joined once, then "DevNonce already used" → make sure "Resets join nonces" is on (step 4).
+- **`radio.begin()` error -707** at boot: wrong radio library. Use the **ropg** Heltec ESP32 LoRa V3 library.
+- **Node won't join / nothing in the app after switching:** the gateway probably isn't actually connected. Recheck steps 2 and 3 (Packet Forwarder, server `nam1...:1700`, US915 **sub-band 2**, gateway added in the app). Keep the node and gateway 5-10 m apart with a wall between them; too close can desensitize the radio.
+- **Need to go back to Wi-Fi:** hold the board's **PRG** button about 3 seconds and it returns to Wi-Fi setup. You can re-switch to LoRaWAN later; it reuses the same identity, so no orphan device is created.
 
-**You're done when:** the TTS device Live data shows uplinks every ~60s with decoded sensor values, and you've sent Bryan (1) the device ID and (2) the agreed webhook token.
+**You're done when:** the node shows live in the app with a LoRaWAN badge and readings refreshing about every 60 seconds.

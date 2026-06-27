@@ -1,134 +1,154 @@
-# 1. System Overview
+# GrowthPulse Engineering Manual
 
-GrowthPulse is a complete consumer IoT product: a sensor node a customer plugs in and pairs from their phone, a cloud pipeline, and a multi-tenant web application with real accounts, alerts, and subscription tiers. This manual documents every layer of the system, every source file and every significant function, and the reasoning behind every decision. It is an internal document and assumes engineering context.
+| | |
+|---|---|
+| Document | GP-EM-001, GrowthPulse Engineering Manual |
+| Revision | 3.0 |
+| Date | June 11, 2026 |
+| Status | Released |
+| Classification | Internal, confidential |
+| Applies to | Firmware v4.3, Web app v2.22.2 |
 
-## 1.1 The data path
+## About this manual
+
+This is the engineering record of GrowthPulse. It documents every layer of the system, the reasoning behind every significant decision, every problem encountered during development, and the workaround or fix that resolved it. A new engineer who reads this manual front to back should understand not just what the system does, but why it is built the way it is, what was tried and rejected, and where the sharp edges are.
+
+It is one of four controlled documents. Each has a distinct job:
+
+| Document | Job |
+|----------|-----|
+| Engineering Manual (this document) | The development record: architecture, decisions, reasoning, problems, and fixes |
+| Technical Reference Manual | The current-state specification: pinouts, constants, APIs, schemas, payloads, identifiers |
+| Operations Manual | Procedures and runbooks: setup, flashing, provisioning, deployment, recovery, troubleshooting |
+| User Manual | The customer-facing guide: setup, pairing, app features, troubleshooting, FAQ |
+
+When this manual and the Technical Reference Manual disagree on a value, the source code is authoritative and the Technical Reference Manual is the first document to correct.
+
+Credentials policy: no usernames, passwords, keys, or tokens appear in this manual or in git. Live secrets exist in exactly three places: the gitignored `.env` on the development machine, Netlify's environment variable store, and the private firmware build. The repository copy of the firmware carries a placeholder provisioning token.
+
+---
+
+# Part I. The Product and the System
+
+## 1. Product overview
+
+GrowthPulse is a complete consumer IoT product: a sensor node a customer plugs in and pairs from their phone, a cloud pipeline, and a multi-tenant web application with real accounts, alerts, plant intelligence, and subscription tiers. The live application is at growthpulsecloud.com.
+
+Three hard requirements shaped almost every decision in the system:
+
+1. **One firmware image for every board, with no per-board secrets.** A board figures out its own identity at first boot. This is what makes "mail a customer a board" possible, and it is why self-provisioning exists at both the Wi-Fi and LoRaWAN layers.
+2. **The customer never touches a cloud console.** Adding a gateway, switching a node between Wi-Fi and LoRaWAN, factory-resetting a unit for resale: all of it happens inside the GrowthPulse app. Losant, Supabase, and The Things Stack are invisible to the customer.
+3. **The app always shows the truth.** A claimed device that has never reported shows "waiting," not invented numbers. A disconnected probe shows "not connected," not garbage. The connection badge shows the link the node is actually using, derived from telemetry, never a label the user picked. Trust is the product.
+
+### 1.1 What the product does
+
+A node carries three sensors: a DS18B20 waterproof soil temperature probe, a DHT22 air temperature and humidity sensor, and a capacitive soil moisture probe. It streams readings to the cloud over the customer's Wi-Fi, or over LoRaWAN through a gateway for fields and far gardens. The app turns those readings into a live dashboard with a 0 to 100 plant health score, species-aware status colors and advice (a catalog of more than 140 plants, each mapped to ideal ranges), history charts, configurable alarms with email and SMS delivery, weather and rain-delay intelligence pinned to the plant's own home location, a growth journal, and branded PDF reports.
+
+### 1.2 Development timeline in one paragraph
+
+The app went from first commit to v2.22.2 between June 1 and June 11, 2026; the firmware went from the team's baseline sketch (hardcoded Wi-Fi credentials, serial prints) to the v4.3 combined dual-transport image over the same period. The big arcs were: simulated data to live cloud data (June 1 to 3), real accounts and cloud-authoritative ownership (June 3 to 5), honesty and reporting (June 4 to 5), self-provisioning and battery (June 5 to 9), and the full LoRaWAN system with automated provisioning and bidirectional transport switching (June 9 to 11). Chapter 20 is the complete chronological record of every problem hit along the way.
+
+## 2. System architecture
+
+### 2.1 The two clouds, and why there are two
+
+GrowthPulse uses two managed clouds, each doing the thing it is best at.
+
+**Losant** is the device cloud and the single source of truth the app reads. Every node, Wi-Fi or LoRaWAN, is represented as exactly one Losant device. Losant terminates the MQTT connections from Wi-Fi units, stores the latest state and the full time-series history per device, runs the email and SMS alert workflows, and delivers commands back down to connected units.
+
+**The Things Stack (TTS)**, on The Things Network sandbox, is the LoRaWAN network server. It owns the radio side: gateways, OTAA joins, and the LoRaWAN session. It stores no plant data. When a LoRaWAN uplink arrives, TTS forwards it to a GrowthPulse webhook, which translates it into a Losant state update. TTS is a bridge from the radio world into Losant, never a second source of truth.
+
+The design choice that makes transport switching possible: **both transports write to the same Losant device.** A node that moves from Wi-Fi to LoRaWAN and back remains one plant in the app the entire time, because the app only ever reads Losant.
+
+```
+Wi-Fi node    --MQTT--------------------------------> Losant  <--reads-- app
+LoRaWAN node  --radio--> gateway --> TTS --webhook--> Losant  <--reads-- app
+```
+
+![GrowthPulse system architecture](assets/System Architecture.svg)
+
+### 2.2 The data path
 
 ```
 Sensors (DS18B20, DHT22, capacitive soil probe)
-   -> ESP32-S3 firmware (GP_Provisioning.ino)
-   -> MQTT over the customer's Wi-Fi
-   -> Losant device cloud (stores live state + full time-series history, runs alert workflows)
-   -> Netlify serverless functions  (Losant tokens held server-side):
-        device-state.js    live composite state (every refresh tick)
-        device-history.js  time-series history for report graphs
-        render-pdf.js      headless-Chrome vector PDF of a report
+   -> ESP32-S3 combined firmware (GP_Combined.ino, v4.3)
+   -> MQTT over Wi-Fi, or a 9-byte LoRaWAN uplink through a gateway
+   -> Losant device cloud (live state, time-series history, alert workflows)
+   -> Netlify serverless functions (all cloud tokens held server-side):
+        device-state.js     live composite state, polled by the app
+        device-history.js   time-series history for report graphs
+        render-pdf.js       headless-Chrome vector PDF of a report
    -> React web app at growthpulsecloud.com
    -> the customer
 ```
 
-## 1.2 The control path
+### 2.3 The control path
 
 ```
-App "Factory reset" button
-   -> Netlify function device-command.js (write token, allowlisted commands)
-   -> Losant command REST API
-   -> MQTT command down to the unit
-   -> firmware handleCommand(): wipe Wi-Fi credentials, reboot into setup mode
+App action (factory reset, transport switch)
+   -> Netlify function (owner-verified, command allowlisted)
+   -> Losant command REST API (Wi-Fi units, delivered over MQTT)
+      or a TTS downlink queued for the node's next uplink (LoRaWAN units)
+   -> firmware command handler / downlink handler
 ```
 
-## 1.3 The identity chain
+The asymmetry between those two delivery mechanisms, instant on Wi-Fi versus next-check-in on LoRaWAN, drives a large amount of design in chapters 13 and 20.
+
+### 2.4 The identity chain
 
 ```
-ESP32 factory MAC (burned in at chip manufacture)
-   -> low 24 bits rendered as uppercase hex = pairing code (e.g. 4A7AC)
-   -> shown large on the unit's OLED, and embedded in the setup hotspot name
+ESP32 factory-burned MAC (efuse, unique per chip, permanent)
+   -> 24 bits rendered as uppercase hex = the pairing code
+   -> shown large on the OLED, embedded in the setup hotspot name
    -> device_registry row in Supabase maps pairing code -> Losant device id
    -> customer types the code in the app -> claim validated -> device on account
 ```
 
-## 1.4 Services used, and what each one does
+The pairing code is deterministic: the same physical board always produces the same code, even after a factory reset or a reflash. That single property is what lets a reset board reclaim its own cloud identity instead of creating a duplicate (section 12.2), and it is why the code doubles as the unit's serial number. The combined firmware derives the code from the high 24 bits of the efuse MAC, zero-padded to six hex characters; the original demo unit, provisioned under the earlier firmware, keeps its historical five-character code `4A7AC` because the registry, not the formula, is the authority once a code is registered.
 
-| Service | Used for | Link |
-|---------|----------|------|
-| GitHub | Source control for the web app + serverless functions; pushing to main triggers deploys | github.com/BryanPuckettGH/growthpulse-app |
-| Netlify | Hosting for growthpulsecloud.com, build pipeline, serverless functions, environment variables | netlify.com |
-| Supabase | User accounts (email/password auth) and the device_registry pairing table | supabase.com |
-| Losant | Device cloud: MQTT broker, device state storage, email/SMS alert workflows, command delivery | losant.com |
-| Open-Meteo | Weather forecasts and the place-name geocoder used for per-plant home locations. Free, no API key | open-meteo.com |
-| Heltec docs | Board documentation, GPIO usage guide for the WiFi LoRa 32 V3 | wiki.heltec.org |
-| Silicon Labs | CP210x USB-to-UART driver needed to program the board | silabs.com/developer-tools/usb-to-uart-bridge-vcp-drivers |
-| Arduino | The IDE used to build and flash the firmware | arduino.cc/en/software |
+![Identity and claiming chain](assets/Identity and Claiming.svg)
 
-Credentials policy: no usernames, passwords, keys, or tokens appear in this manual or in git. Live secrets exist in exactly three places: the gitignored `.env` on the development machine, Netlify's environment variable store, and the firmware file (which is kept out of public repositories for that reason).
+### 2.5 Services used, and what each one does
 
----
+| Service | Used for |
+|---------|----------|
+| GitHub | Source control; pushing to main triggers production deploys (github.com/BryanPuckettGH/growthpulse-app) |
+| Netlify | Hosting for growthpulsecloud.com, the build pipeline, nine serverless functions, and the environment variable store |
+| Supabase | User accounts (email and password auth), the pairing registry, device ownership, gateway records, LoRaWAN routing |
+| Losant | Device cloud: MQTT broker, state and history storage, email and SMS alert workflows, command delivery |
+| The Things Stack | LoRaWAN network server on The Things Network sandbox: gateways, OTAA, session, uplink webhook |
+| Open-Meteo | Weather forecasts and the place-name geocoder for per-plant home locations; free, no API key |
 
-# 2. Getting the Code and Setting Up
+Supporting references: Heltec board documentation (wiki.heltec.org), the Silicon Labs CP210x USB driver (silabs.com), the Arduino IDE (arduino.cc), and the RadioLib LoRaWAN stack (github.com/jgromes/RadioLib).
 
-## 2.1 The web application
+### 2.6 The security model in five rules
 
-```
-git clone https://github.com/BryanPuckettGH/growthpulse-app.git
-cd growthpulse-app
-npm install
-npm run dev          # opens at http://localhost:5173
-```
-
-Requires Node.js LTS (nodejs.org). Create a `.env` file in the project root with these variable names (values come from the team's Supabase and Losant dashboards, never from this document):
-
-```
-VITE_SUPABASE_URL=
-VITE_SUPABASE_ANON_KEY=
-LOSANT_API_TOKEN=
-LOSANT_APP_ID=
-LOSANT_COMMAND_TOKEN=
-```
-
-Two things about local development:
-
-- Variables prefixed `VITE_` are compiled into the browser bundle by Vite. Everything else is only readable by the serverless functions. That prefix is the security boundary, never put a secret behind a `VITE_` name.
-- `npm run dev` runs Vite only. The serverless functions do not execute, so claimed devices sit at "waiting for first reading" locally. To exercise the full pipeline either use the deployed site or run `netlify dev` (Netlify CLI), which serves the functions too.
-
-Deployment is automatic: any push to `main` triggers a Netlify build (`npm run build`, publish `dist/`, bundle `netlify/functions/` with esbuild, all configured in `netlify.toml`).
-
-## 2.2 The firmware toolchain, from zero
-
-Everything needed to program a unit on a fresh computer:
-
-1. **Arduino IDE 2.x** from arduino.cc/en/software.
-2. **USB driver.** The board talks USB through a Silicon Labs CP2102 bridge. Without the driver the board never shows up as a serial port. Install the CP210x Virtual COM Port driver from silabs.com/developer-tools/usb-to-uart-bridge-vcp-drivers. On macOS the port then appears as `/dev/cu.usbserial-XXXX`; on Windows as `COMn`.
-3. **Board support.** Arduino IDE, Settings, Additional boards manager URLs, add the Espressif index: `https://espressif.github.io/arduino-esp32/package_esp32_index.json`. Then Boards Manager, install **esp32 by Espressif Systems**. Select the board **"Heltec WiFi LoRa 32(V3)"**, not a generic ESP32-S3 profile, the Heltec definition carries the correct flash and pin configuration.
-4. **Libraries** (Library Manager, exact names):
-
-| Library | Author | Used for |
-|---------|--------|----------|
-| WiFiManager | tzapu | Captive-portal Wi-Fi provisioning (release 2.0.17 at time of writing) |
-| OneWire | Paul Stoffregen | 1-Wire bus for the DS18B20 |
-| DallasTemperature | Miles Burton | DS18B20 temperature conversion |
-| DHT sensor library | Adafruit | DHT22 (installs Adafruit Unified Sensor as a dependency) |
-| Losant Arduino MQTT Client | Losant | Device cloud connection (installs PubSubClient) |
-| ArduinoJson | Benoit Blanchon | Telemetry payloads (v6-style StaticJsonDocument) |
-| U8g2 | oliver | The on-board OLED |
-
-5. **Open** `GP_Provisioning/GP_Provisioning.ino` (the folder name must match the file name, an Arduino requirement).
-6. **Upload.** Plug in USB-C, pick the port, click Upload. If the upload hangs at "Connecting..." or dies mid-write with "the chip stopped responding," two fixes in order: set Tools, Upload Speed to **115200** (the 921600 default outruns marginal cables), and if needed force download mode by holding **PRG**, tapping **RST**, holding PRG one more second, then uploading.
-7. **Serial Monitor** at **115200 baud** shows the boot banner, the pairing code, Wi-Fi progress, and a one-line telemetry summary every cycle, including the raw soil ADC value used for calibration.
-
-## 2.3 What is deliberately not in GitHub
-
-`GP_Provisioning.ino` contains the unit's Losant device id, access key, and access secret, compiled in. One demo unit makes that acceptable; publishing it would not be. The firmware therefore lives in the project folder, not the public repo. The production path (per-unit credentials written at flash time by a provisioning station) is covered in the Roadmap.
+1. **No cloud token ever reaches a browser.** The app calls same-origin Netlify functions; the functions hold the tokens. The `VITE_` prefix on an environment variable is the public/private boundary, enforced by Vite at build time.
+2. **The database is the guard.** Supabase row-level security gates every table. The anon key ships in the bundle by design; it grants exactly what the RLS policies say and nothing more. Service-role access, which bypasses RLS, exists only inside serverless functions.
+3. **Least privilege per token.** Losant has a read-only token for the hot polling path and a separate write-capable token for commands and state injection. If the read token leaked, it could only read.
+4. **The firmware image carries no per-board secrets.** Wi-Fi identities are minted at first boot by `provision-device`; LoRaWAN keys are pushed at provisioning time and live only in the board's flash. The one shared value, the firmware provisioning token, is a placeholder in the repository and real only in private builds.
+5. **Commands are allowlisted and owner-verified.** The command endpoint accepts exactly the commands it knows, requires a signed-in session, and confirms through RLS that the caller owns the target device before sending anything.
 
 ---
 
-# 3. Hardware
+# Part II. Hardware Engineering
 
-## 3.1 The board
+## 3. The board
 
-Heltec WiFi LoRa 32 V3, silkscreen HTIT-WB32LAF. Relevant capabilities:
+Heltec WiFi LoRa 32 V3, silkscreen HTIT-WB32LAF. It was selected because it carries every radio the product roadmap needs on one module:
 
 | Component | Detail |
 |-----------|--------|
 | MCU | ESP32-S3 dual-core, 240 MHz, 8 MB flash |
-| Radios | 2.4 GHz Wi-Fi b/g/n, BLE, and an SX1262 LoRa transceiver (915 MHz US) |
-| Display | 0.96 inch SSD1306 OLED, 128x64, on I2C |
-| USB | USB-C through a CP2102 UART bridge |
+| Radios | 2.4 GHz Wi-Fi b/g/n, BLE, and a Semtech SX1262 LoRa transceiver (915 MHz US) |
+| Display | 0.96 inch SSD1306 OLED, 128x64, I2C |
+| USB | USB-C through a Silicon Labs CP2102 UART bridge |
 | Buttons | RST (hard reset) and PRG (user button on GPIO0) |
-| Power | 5V in via USB-C or the 5V header pin; onboard 3.3V regulator; JST connector for a LiPo battery |
+| Power | 5V in via USB-C or the 5V header pin, onboard 3.3V regulator, JST connector and charge circuit for a LiPo battery |
 
-The SX1262 is unused by the current firmware but is the hardware foundation of the LoRaWAN roadmap: the same physical unit becomes a LoRaWAN node with a firmware variant, no new electronics.
+The same physical unit is the Wi-Fi node and the LoRaWAN node; the transport is purely a firmware decision. That is the hardware foundation of the whole dual-transport design: no new electronics were needed to add LoRaWAN.
 
-## 3.2 Pin assignments, and why each one
+## 4. Pin assignments, and why each one
 
 | Function | GPIO | Reasoning |
 |----------|------|-----------|
@@ -136,961 +156,692 @@ The SX1262 is unused by the current firmware but is the hardware foundation of t
 | DHT22 data | 5 | Same list |
 | Soil moisture analog out | 2 | Moved off GPIO1 after bring-up testing: GPIO1 is wired to the board's battery-voltage sense network and read a flat 0 regardless of the sensor. GPIO2 is the adjacent clean ADC1 channel |
 | PRG button | 0 | The board's built-in user button; a boot-strapping pin, safe to read after boot |
+| Battery sense control | 37 | Gates the battery voltage divider (section 6.2) |
+| Battery sense ADC | 1 | The divider's midpoint; the reason the soil probe could not stay on GPIO1 |
+| Optional VBUS sense | 7 | Midpoint of the optional 100k/100k USB-detect divider (section 6.4) |
 | OLED SDA / SCL / reset | 17 / 18 / 21 | Fixed by board routing |
-| OLED power rail (Vext) | 36 | The V3 feeds the OLED from a switched rail; the firmware must drive GPIO36 LOW to power it. Forgetting this is the classic blank-screen failure |
+| OLED power rail (Vext) | 36 | The V3 feeds the OLED from a switched rail; firmware must drive GPIO36 LOW to power it. Forgetting this is the classic blank-screen failure |
 
-Analog constraints worth memorizing: analog inputs must use ADC1 channels (GPIO1 through 10) because ADC2 is owned by the Wi-Fi radio while it runs. Resolution is configured to 12 bits, so raw readings span 0 to 4095.
+The SX1262 radio pins (NSS 8, DIO1 14, RST 12, BUSY 13, SCK 9, MISO 11, MOSI 10) are fixed by the board schematic and covered with the LoRaWAN bring-up in chapter 13.
 
-## 3.3 Sensor electronics
+Analog constraints worth memorizing: analog inputs must use ADC1 channels (GPIO1 through 10) because ADC2 is owned by the Wi-Fi radio while it runs. GPIO19 and GPIO20 are therefore unusable for the soil probe. Resolution is configured to 12 bits, so raw readings span 0 to 4095.
 
-### DS18B20, soil temperature
+## 5. Sensor electronics
 
-A digital 1-Wire device in a waterproof probe. Wiring: red to 3V3, black to GND, yellow (data) to pin 4, **plus a 4.7 kilo-ohm resistor from the data line to 3V3**. The resistor is not optional and the reason is the bus design: on 1-Wire, the master and every sensor only ever pull the line LOW. Nothing on the bus can drive it high. The pull-up resistor is the only thing that returns the line to 3.3V between pulses. Without it the line never rises, communication is impossible, and the Dallas library returns its "no device" sentinel of -127 C, which converts to the famous **-196.6 F**. The app now recognizes that exact value (section on disconnected-sensor detection) and turns it into a "probe not detected" message naming the resistor.
+### 5.1 DS18B20, soil temperature
 
-Each DS18B20 also carries a unique 64-bit serial number whose first byte (the family code) is 0x28. During bring-up we used a 1-Wire scanner sketch that searches the bus and prints these addresses; a found address proves the wiring end-to-end even if temperature conversion were broken, and a storm of random non-0x28 addresses indicates electrical noise on a floating line rather than real devices.
+A digital 1-Wire device in a waterproof probe. Wiring: red to 3V3, black to GND, yellow (data) to GPIO4, plus a **4.7 kilo-ohm resistor from the data line to 3V3**. The resistor is not optional, and the reason is the bus design: on 1-Wire, the master and every sensor only ever pull the line LOW. Nothing on the bus can drive it high. The pull-up resistor is the only thing that returns the line to 3.3V between pulses. Without it the line never rises, communication is impossible, and the Dallas library returns its "no device" sentinel of -127 C, which converts to the famous **-196.6 F**. That exact value was the first hardware mystery of the project; the app now recognizes it (section 16.2) and turns it into a "probe not detected" insight that names the resistor.
 
-### DHT22, air temperature and humidity
+Each DS18B20 carries a unique 64-bit serial number whose first byte (the family code) is 0x28. During bring-up we used a 1-Wire scanner sketch that searches the bus and prints these addresses; a found address proves the wiring end to end even if temperature conversion were broken, and a storm of random non-0x28 addresses indicates electrical noise on a floating line rather than real devices.
 
-A single-wire (not 1-Wire) digital sensor: VCC to 3V3, data to pin 5, 10 kilo-ohm pull-up from data to VCC (the common 3-pin breakout module has this resistor built in; a bare 4-pin part needs it added). When the sensor is absent the library returns NaN; ArduinoJson serializes NaN as JSON null; the connector passes null through; and the app reads null as "not connected." The failure mode was designed into the pipeline rather than hidden.
+### 5.2 DHT22, air temperature and humidity
 
-### Capacitive soil moisture probe
+A single-wire (not 1-Wire) digital sensor: VCC to 3V3, data to GPIO5, 10 kilo-ohm pull-up from data to VCC. The common 3-pin breakout module has the resistor built in; a bare 4-pin part needs it added. When the sensor is absent the library returns NaN; ArduinoJson serializes NaN as JSON null; the connector passes null through; and the app reads null as "not connected." The failure mode was designed into the pipeline rather than hidden.
+
+### 5.3 Capacitive soil moisture probe
 
 The flat-blade capacitive probe (v1.2 style): VCC, GND, AO (analog out). Two hard-won findings:
 
-1. **It must be powered from 5V, not 3.3V.** These modules build their oscillator around an NE555 timer, and the NE555 does not run below roughly 4 volts. At 3.3V the power LED lights (LEDs do not care) but the oscillator is dead and AO sits near 0.1V, which reads as raw ~120 and maps to a frozen "100 percent" moisture. Vendors list the modules as 3.3 to 5.5V; the ones with NE555 silicon are 5V parts in practice. At 5V supply the analog output tops out near 3V, which is inside the ESP32 ADC's safe range, so no level shifting or divider is required.
-2. **Raw, not percent, is the calibration currency.** The firmware reports both. Calibration procedure: read `raw=` from the Serial line with the probe in dry air (that number becomes `dryValue`, typically near 3600) and submerged to its line in water (`wetValue`, typically near 1300), then update the two constants. Note the inversion: wetter soil means lower raw counts, which is inherent to how the capacitance loads the oscillator.
+1. **It must be powered from 5V, not 3.3V.** These modules build their oscillator around an NE555 timer, and the NE555 does not run below roughly 4 volts. At 3.3V the power LED lights (LEDs do not care) but the oscillator is dead and AO sits near 0.1V, which reads as raw ~120 and maps to a frozen "100 percent" moisture. Vendors list the modules as 3.3 to 5.5V; the ones with NE555 silicon are 5V parts in practice. At 5V supply the analog output tops out near 3V, inside the ESP32 ADC's safe range, so no level shifting or divider is required.
+2. **Raw counts, not percent, are the calibration currency.** The firmware reports both. Calibration: read the raw value with the probe in dry air (that becomes `dryValue`, typically near 3600) and submerged to its line in water (`wetValue`, typically near 1300), then update the two constants. Note the inversion: wetter soil means lower raw counts, inherent to how the capacitance loads the oscillator.
 
-### Wiring summary
+The firmware additionally treats a raw reading below 300, or a 10-sample spread wider than 600 counts, as "no probe": a powered probe in air sits near its dry point, so a near-zero or wildly jittering signal is a floating pin, not data (section 8.6).
+
+### 5.4 Wiring summary
+
+![GrowthPulse node wiring diagram](assets/Wiring Diagram.svg)
 
 | Sensor | VCC | GND | Signal | Extra |
 |--------|-----|-----|--------|-------|
-| DS18B20 | 3V3 | GND | pin 4 | 4.7k pull-up, data to 3V3, required |
-| DHT22 | 3V3 | GND | pin 5 | 10k pull-up (built into 3-pin modules) |
-| Soil moisture | **5V** | GND | pin 2 | none; powered from 5V on purpose |
+| DS18B20 | 3V3 | GND | GPIO4 | 4.7k pull-up, data to 3V3, required |
+| DHT22 | 3V3 | GND | GPIO5 | 10k pull-up (built into 3-pin modules) |
+| Soil moisture | **5V** | GND | GPIO2 | none; powered from 5V on purpose |
 
-A printable wiring diagram and a breadboard-level guide live in `docs/GrowthPulse Wiring Diagram.pdf` and `docs/GrowthPulse Wiring Guide.md`.
+The bench-level wiring procedure, including bench supply settings and the pin-finding guide for the board's silkscreen, lives in the Operations Manual.
 
-## 3.4 Power
+## 6. Power and battery
 
-The board takes 5V in (USB-C from any phone charger, or a bench supply at 5.0V with roughly a 1A current limit feeding the 5V and GND header pins). Measured behavior: about 150 mA idle, with 300 to 500 mA bursts during Wi-Fi transmit; brownout resets during flashing or Wi-Fi joins are a cable or supply problem, not a firmware problem. Sensors draw single-digit milliamps and are powered from the board's regulated rails as in the table above.
+### 6.1 Supply
 
-**Battery readiness.** Moving the soil probe off GPIO1 had a second benefit: GPIO1 is the battery-sense input, and it is now free. Battery support is therefore a contained firmware task: enable the sense divider, read VBAT, convert to percent, and add `batteryPct` and `charging` to the telemetry JSON. The cloud connector already forwards those two fields and the entire app UI for them (power badges, color thresholds, low-battery insights) is built and waiting.
-# 4. Firmware, Section by Section
+The board takes 5V in: USB-C from any phone charger, or a bench supply at 5.0V with roughly a 1A current limit feeding the 5V and GND header pins. Measured behavior: about 150 mA idle, with 300 to 500 mA bursts during Wi-Fi transmit. Brownout resets during flashing or Wi-Fi joins are a cable or supply problem, not a firmware problem. Sensors draw single-digit milliamps from the board's regulated rails. Never feed 5V into a 3V3 pin.
 
-The firmware is one annotated file, `GP_Provisioning.ino`, about 350 lines. One file is a deliberate choice at this scale: it can be reviewed top to bottom, pasted whole into the IDE, and handed to a teammate without explaining a build system. This chapter walks every section in file order and explains each decision.
+### 6.2 Battery sensing, and the inverted control pin
 
-## 4.1 Includes and pin definitions
+The Heltec V3 reads its LiPo through a voltage divider gated by a control pin (GPIO37), with the midpoint on GPIO1. Two findings from bring-up:
 
-```cpp
-#include <WiFi.h>
-#include <WiFiManager.h>     // tzapu: captive portal provisioning
-#include <OneWire.h>
-#include <DallasTemperature.h>
-#include <DHT.h>
-#include <Losant.h>          // MQTT device client
-#include <ArduinoJson.h>
-#include <Wire.h>
-#include <U8g2lib.h>         // OLED
+- **On this board the control polarity is inverted from the documented Heltec reference.** Driving the pin per the documentation disabled the divider exactly when the firmware meant to enable it, which is why the battery always read 0 percent and the unit claimed AC power even on battery. The firmware drives the opposite level, waits for the divider to settle, averages 16 ADC samples, then releases the pin to an input.
+- The measured conversion is `volts = rawAverage / 238.7`, mapped to percent through a 100-entry discharge curve between 3.04V (empty) and 4.26V (full). A simple linear voltage-to-percent map reads LiPo packs badly because their discharge curve is flat in the middle; the lookup table tracks the real chemistry.
 
-#define ONE_WIRE_BUS 4       // DS18B20
-#define DHTPIN 5             // DHT22
-#define DHTTYPE DHT22
-#define SOIL_PIN 2           // moved off GPIO1 (battery-sense conflict)
-#define RESET_BTN 0          // PRG button
+### 6.3 Charging inference and display smoothing
 
-#define VEXT_PIN 36          // LOW powers the OLED rail on the V3
-#define OLED_SDA 17
-#define OLED_SCL 18
-#define OLED_RST 21
-U8G2_SSD1306_128X64_NONAME_F_HW_I2C oled(U8G2_R0, OLED_RST, OLED_SCL, OLED_SDA);
-```
+The V3 exposes no charge-status pin, so charging cannot be read; it is inferred. The firmware smooths the measured voltage (an exponential filter), then reasons: a rising trend means charging; a voltage sitting at the charger's top-of-charge level means charging (or done); a falling trend means discharging. Two refinements came from observed misbehavior:
 
-The U8g2 constructor takes rotation, then reset, clock, data. Passing the V3's exact pins matters; the generic constructor assumes default I2C pins and produces a blank screen.
+- **A charger inflates the pack's terminal voltage instantly**, so a 44 percent pack read as 65 percent the moment a cable went in. The displayed percent now creeps at most 1 percent per reading, rising only while charging and easing back toward the true level on battery. What the customer sees tracks the real charge, not the electrical artifact.
+- **With no battery installed on USB**, the charge chip pins the sense line near a full pack's voltage, and there is no battery-detect pin to tell "no battery" from "full battery." This cannot be fully resolved in software. The firmware reports AC power when the line sits pinned at the top and is no longer rising, which is honest for both the no-battery case and the fully-charged-on-charger case.
 
-## 4.2 Calibration constants and unit identity
+### 6.4 The optional VBUS mod, true USB detection
 
-```cpp
-int dryValue = 3600;   // raw ADC with the probe in dry air
-int wetValue = 1300;   // raw ADC submerged in water
+The fully honest fix for USB-versus-battery detection is one optional hardware mod: a 100k/100k divider from the board's labeled 5V pin to ground, midpoint on GPIO7. On USB the midpoint reads about 2.5V; on battery, 0V. With the firmware's `USE_VBUS_SENSE` flag set to 1, the unit reads a real plugged-in signal instead of inferring from voltage. Default is off, so boards without the wire are unchanged. The wire is tapped from the 5V header pin, never from inside the USB-C cable.
 
-const char* LOSANT_DEVICE_ID    = "...";  // this unit's cloud identity
-const char* LOSANT_ACCESS_KEY   = "...";  // values not reproduced here;
-const char* LOSANT_ACCESS_SECRET= "...";  // they live only in the firmware file
-```
+### 6.5 Soft power-off
 
-`dryValue` and `wetValue` are intentionally plain globals near the top: they are the two numbers a technician edits after the calibration procedure (section 3.3). The Losant triplet is this single demo unit's identity, compiled in; the production replacement is per-unit credentials written at flash time.
-
-## 4.3 The branded captive portal markup
-
-Two raw-string constants are injected into WiFiManager's portal pages:
-
-- `GP_HEAD`: a `<style>` block restyling the stock portal with brand colors (green buttons, brand typography, soft backgrounds). Injected into every portal page via `setCustomHeadElement`.
-- `GP_BRANDING`: a block of HTML carrying the GrowthPulse logo as inline SVG, the wordmark, the SMART PLANT MONITORING tagline, and a "thanks for your purchase" welcome. It rides in as a `WiFiManagerParameter`, which WiFiManager renders at the top of the configuration page.
-
-Why inline SVG: the customer's phone is connected to the device's hotspot with no internet, so the page cannot reference any external image. Everything the portal shows must be served from the chip itself.
-
-## 4.4 Identity helpers
-
-```cpp
-String pairCode() {
-  char b[8];
-  snprintf(b, sizeof(b), "%X", (uint32_t)(ESP.getEfuseMac() & 0xFFFFFF));
-  return String(b);
-}
-String apSsid() {
-  char b[24];
-  snprintf(b, sizeof(b), "GrowthPulse-%06X", (uint32_t)(ESP.getEfuseMac() & 0xFFFFFF));
-  return String(b);
-}
-```
-
-`ESP.getEfuseMac()` returns the factory-burned MAC, unique per chip, free, and permanent. The low 24 bits are formatted as uppercase hex: `%X` (no leading zeros) for the human pairing code, `%06X` (zero-padded) inside the hotspot SSID so the network name has a consistent shape. The pairing code is the same value the registry stores and the app validates, one identity, three surfaces.
-
-## 4.5 The OLED stack
-
-```cpp
-void oledInit() {
-  pinMode(VEXT_PIN, OUTPUT);
-  digitalWrite(VEXT_PIN, LOW);   // power the display rail
-  delay(80);                     // let the rail settle before init
-  oled.begin();
-  oled.setContrast(255);
-}
-```
-
-`drawBigCentered()` implements adaptive type for the pairing code: it measures the string in FreeUniversal Bold 30, then 25, then 20, and draws with the largest font that fits in 124 px, horizontally centered. The pairing code is the one thing a customer must read off the hardware, so it gets the biggest legible rendering regardless of whether a given chip's code is 5 or 6 characters.
-
-Four screens, all built the same way (clear buffer, set font, draw strings, send buffer):
-
-| Screen | When | Content |
-|--------|------|---------|
-| `oledMessage(l1, l2)` | transient states | bold headline plus detail line ("Starting up", "Connecting to your Wi-Fi...", "Clearing Wi-Fi") |
-| `oledSetup()` | the setup hotspot is open | "Setup - join Wi-Fi:", the SSID bold and centered, "then open the app" |
-| `oledStatus(online)` | steady state | "PAIR CODE" header, ON or .. connection chip, the code huge |
-| (via `onSetupPortal`) | WiFiManager AP callback | flips to `oledSetup` at the exact moment the portal opens |
-
-The status screen never hides the code after pairing, on purpose: re-pairing, adding to a second account someday, and resale all need it, and it doubles as the unit's serial number.
-
-## 4.6 connectWiFi(), line by line
-
-```cpp
-void connectWiFi() {
-  WiFiManager wm;
-  // (setPreloadWiFiScan needs a newer WiFiManager release; skipped here.)
-  wm.setWiFiAutoReconnect(false);  // stop background retries from yanking
-                                   // the radio off the hotspot channel
-  WiFi.setSleep(false);            // keep the AP responsive to the phone
-  wm.setCustomHeadElement(GP_HEAD);
-  WiFiManagerParameter gpBranding(GP_BRANDING);
-  wm.addParameter(&gpBranding);
-  wm.setAPCallback(onSetupPortal);
-  wm.setConfigPortalTimeout(600);  // 10 minutes
-
-  String ap = apSsid();
-  oledMessage("Connecting to", "your Wi-Fi...");
-  if (!wm.autoConnect(ap.c_str())) {
-    oledMessage("Setup timed out", "restarting...");
-    delay(1500);
-    ESP.restart();
-  }
-  oledStatus(false);
-}
-```
-
-Reasoning per line:
-
-- **autoConnect** does the whole provisioning policy: try saved credentials; if none or they fail, open the branded hotspot and serve the portal; return true once associated. One call, no custom state machine.
-- **setWiFiAutoReconnect(false)** and **WiFi.setSleep(false)** fix a real observed failure: while the portal is open the chip runs AP+STA simultaneously, and both background STA retry scans and modem power-save pull the radio off the AP channel. The symptom is the customer's phone hanging on "connecting..." to the hotspot for a minute or more. With these two lines the join completes in seconds.
-- **setConfigPortalTimeout(600)**: the 180-second default expired mid-demo while a phone was slow to pop the portal, restarting the AP underneath the user. Ten minutes gives a human-paced setup window; on timeout the device restarts and reopens setup rather than wedging.
-- **setPreloadWiFiScan(true)** would move the network scan before the AP opens (another join-speed win) but the setter only exists in WiFiManager's unreleased development code; release 2.0.17 compiles without it, so it is deliberately omitted with a comment.
-- The portal also responds at **192.168.4.1** directly, the documented fallback when a phone suppresses captive-portal detection.
-
-## 4.7 Cloud command handler
-
-```cpp
-void handleCommand(LosantCommand *command) {
-  if (strcmp(command->name, "factoryReset") == 0) {
-    oledMessage("Reset by owner", "clearing Wi-Fi...");
-    delay(800);
-    WiFiManager wm;
-    wm.resetSettings();   // erase stored Wi-Fi credentials
-    delay(400);
-    ESP.restart();        // boots into the setup hotspot
-  }
-}
-```
-
-Registered once in `setup()` with `device.onCommand(&handleCommand)`. This is the device half of the app's resale flow: the owner taps Factory reset, the cloud delivers `factoryReset` over the existing MQTT connection, and the unit physically prepares itself for the next owner, on its screen, in front of you. Commands reach online devices only; the PRG hold is the offline fallback and the app's confirmation dialog says exactly that. The handler ignores every other command name, an allowlist at the firmware level matching the allowlist in the backend function.
-
-## 4.8 connectLosant()
-
-Connects the MQTT client with the device id, access key, and secret, blocking with a dot-progress loop until connected, with OLED messaging. Losant access keys are device credentials (MQTT) and are distinct from API tokens (REST, used by the backend); the two never mix.
-
-## 4.9 setup()
-
-Order matters and each step has a reason:
-
-1. `Serial.begin(115200)`, `analogReadResolution(12)` (12-bit ADC, 0-4095, matching the calibration constants), PRG configured `INPUT_PULLUP`, a 1-second settle delay.
-2. `oledInit()` then a "Starting up" screen, the customer sees life within a second of plugging in.
-3. **Boot-time reset check:** if PRG is held LOW right now, wipe Wi-Fi credentials and continue, which lands in the setup portal. This is reset path one of three.
-4. Serial banner with the pairing code, for bench work without squinting at the OLED.
-5. `ds18b20.begin()`, `dht.begin()`, then `device.onCommand(&handleCommand)` before any connection exists, so no command can ever arrive unhandled.
-6. `connectWiFi()` then `connectLosant()`.
-
-## 4.10 readSensors()
-
-```cpp
-void readSensors() {
-  ds18b20.requestTemperatures();
-  soilTemperatureF = ds18b20.getTempFByIndex(0);   // -196.6F when absent
-
-  airTemperatureF = dht.readTemperature(true);      // NaN when absent
-  airHumidity = dht.readHumidity();
-
-  long sum = 0;
-  for (int i = 0; i < 10; i++) { sum += analogRead(SOIL_PIN); delay(10); }
-  soilRaw = sum / 10;                               // 10-sample average
-  soilMoisturePercent = constrain(map(soilRaw, dryValue, wetValue, 0, 100), 0, 100);
-}
-```
-
-Decisions: sensor failure values pass through untouched (the app turns them into honest UI rather than the firmware guessing); the soil ADC is averaged over 10 samples 10 ms apart because single ESP32 ADC reads jitter by several counts; `map` runs dry-to-wet which inverts the scale correctly since wet soil reads lower; `constrain` clamps readings outside the calibration window instead of reporting 112 percent.
-
-## 4.11 sendTelemetry()
-
-Builds a `StaticJsonDocument<256>` with the five values (`soilTemperatureF`, `airTemperatureF`, `airHumidity`, `soilRaw`, `soilMoisturePercent`) and publishes with `device.sendState`. `soilRaw` ships on purpose: recalibration and the app's floating-probe heuristic both need the raw signal. Serial mirrors a single line per cycle (`Sent moisture=42% raw=2410 airTemp=78.8F`), which is the field calibration tool, no extra software needed.
-
-## 4.12 maybeResetWifi(), reset path two
-
-```cpp
-void maybeResetWifi() {
-  static unsigned long pressStart = 0;
-  if (digitalRead(RESET_BTN) == LOW) {
-    if (pressStart == 0) pressStart = millis();
-    else if (millis() - pressStart >= 3000) {
-      oledMessage("Clearing Wi-Fi", "reopening setup");
-      delay(600);
-      WiFiManager wm; wm.resetSettings(); delay(400);
-      ESP.restart();
-    }
-  } else {
-    pressStart = 0;   // released early: reset the timer
-  }
-}
-```
-
-Hold PRG for 3 seconds at any time while running and the unit wipes Wi-Fi and reboots into setup. This replaced the original hold-PRG-during-RST dance, which demanded sub-second timing customers reliably missed. Design choice: a polled timestamp rather than interrupts, trivially safe alongside two radio stacks, and tolerant of the loop's sensor-read gaps because `pressStart` only clears when the button is actually seen released.
-
-## 4.13 loop()
-
-```cpp
-void loop() {
-  if (WiFi.status() != WL_CONNECTED) connectWiFi();
-  if (!device.connected())          connectLosant();
-
-  readSensors();
-  sendTelemetry();
-  device.loop();                                   // service MQTT (commands arrive here)
-  oledStatus(WiFi.status() == WL_CONNECTED && device.connected());
-
-  unsigned long waitStart = millis();              // 3s between sends, but
-  while (millis() - waitStart < 3000) {            // sampled every 20ms so a
-    maybeResetWifi();                              // 3s PRG hold is never missed
-    delay(20);
-  }
-}
-```
-
-Self-healing first (reconnect either layer that dropped), then read, send, service, display, and a button-aware wait instead of a deaf `delay(3000)`. The 3-second cadence is human-real-time for demos while staying far inside the Losant free tier; battery units will stretch it dramatically.
-
-## 4.14 The diagnostic sketches
-
-Two single-purpose sketches exist for bench debugging and are flashed temporarily over the main firmware:
-
-- **ADC scanner**: prints GPIO 1, 2, 3, 6, 7 raw values side by side twice a second. Used with a jumper test (touch 3V3 to a pin, expect ~4095; touch GND, expect ~0) to prove an ADC pin and to find which pin a wire actually lands on. This is how the GPIO1 battery-sense conflict was isolated.
-- **1-Wire scanner**: searches pins 4, 6, 7 for 1-Wire devices and prints their 64-bit addresses. A real DS18B20 announces with family code 0x28; "nothing" on all pins means the probe never reaches the bus (power, contact, or pull-up); a burst of random addresses is line noise being misparsed, which actually proves the pin and code are alive.
-
-Re-flashing the main firmware afterward restores normal operation; Wi-Fi credentials survive in flash across re-flashes unless explicitly reset.
-# 5. The Device Cloud (Losant)
-
-Losant (losant.com) is the device-facing cloud: it terminates the MQTT connection from every unit, stores the latest state per device, runs the alert workflows, and delivers commands back down.
-
-## 5.1 Device and attributes
-
-One application contains one device per physical unit. The demo unit is the standalone device "Greenhouse Node" (device id `6a1fb486df527c8bf8d3324b`, not a secret, it appears in claim plumbing). Its attributes mirror the telemetry JSON exactly:
-
-| Attribute | Type | Notes |
-|-----------|------|-------|
-| airTemperatureF | number | DHT22 |
-| airHumidity | number | DHT22 |
-| soilTemperatureF | number | DS18B20, carries the -196.6 sentinel when unplugged |
-| soilRaw | number | raw soil ADC, kept for calibration and diagnostics |
-| soilMoisturePercent | number | the derived percentage |
-| batteryPct, charging | number, boolean | reserved for battery firmware; connector already forwards them |
-
-## 5.2 Credentials model: keys vs tokens
-
-Two different credential systems, never interchangeable:
-
-- **Access keys** (key + secret pair) authenticate **devices** over MQTT. The unit's key/secret is compiled into the firmware. Scope: that application's devices.
-- **API tokens** authenticate **applications** over REST. Two exist, on purpose:
-  - a **read-only token** (scope `all.Application.read`) used by `device-state.js` to read composite state. If it ever leaked, it can only read.
-  - a **full-access token** used by `device-command.js` to send commands. It exists separately so the hot, frequently-called read path runs on least privilege.
-
-## 5.3 The wire protocol
-
-- Telemetry up: MQTT publish to `losant/{deviceId}/state` (handled inside the Losant Arduino client by `device.sendState`).
-- Commands down: MQTT message on `losant/{deviceId}/command`, surfaced by the client as the `onCommand` callback. Delivery requires the device to be connected at that moment; there is no offline queue, which is why the app's factory-reset dialog documents the PRG fallback.
-- State read by the backend: REST `GET /applications/{appId}/devices/{deviceId}/compositeState`, returning per-attribute `{ value, time }` pairs.
-
-## 5.4 Alert workflows (email and SMS)
-
-Built in Losant's visual workflow editor:
-
-```
-Device: State trigger  ->  Conditional  ->  Email node (and/or SMS)
-```
-
-- The trigger fires on every state report from the device.
-- The conditional holds the rule, for example `{{ data.soilMoisturePercent }} < 25`.
-- The true branch wires to the Email node (the false branch goes nowhere). A wiring mistake to watch for, learned the hard way: connect the conditional's true output to the email node's input; routing the email node backwards into the conditional silently does nothing.
-- **Rate limit:** Losant email sends are limited to one per minute. During testing, two qualifying readings sent seconds apart produced one email, which looked like a failure and was not. SMS goes through the corresponding SMS node where enabled.
-
-These cloud workflows are what make alerts real-world: they fire even when nobody has the app open. The app's in-app alarm system (chapter 8) is a separate, complementary layer.
-
-## 5.5 The simulator
-
-`growthpulse-simulator/simulator.mjs` is a Node script that connects with the same MQTT credentials and publishes realistic randomized telemetry. It built the entire cloud pipeline before hardware existed and remains the demo tool when the physical unit is elsewhere. Operational rule: never run it at the same time as the real board against the same device id, the two sources interleave into nonsense.
+The board has no power switch. A double-tap of PRG drops the unit into ESP32 deep sleep: the OLED rail is powered down, wake is armed on the PRG pin, and draw falls to microamps, so a battery lasts months. A single press (or RST) wakes it; the firmware detects the deep-sleep wake cause and skips the boot-time Wi-Fi-wipe check so waking never destroys credentials (an early bug, fixed in firmware v3.9).
 
 ---
 
-# 6. Accounts and the Registry (Supabase)
+# Part III. Firmware Engineering
 
-Supabase (supabase.com) provides two things: authentication and the pairing registry.
+## 7. Firmware lineage
 
-## 6.1 Authentication
+The firmware evolved through four named generations. Each exists in the repository under `firmware/` because each remains the cleanest reference for the layer it introduced.
 
-Email/password auth via `@supabase/supabase-js`. Signup attaches profile metadata so the app can address people properly:
+| Generation | Versions | What it introduced |
+|------------|----------|--------------------|
+| Team baseline | v0.9 | The original team sketch: sensor reads with hardcoded Wi-Fi credentials and serial prints |
+| GP_Provisioning | v1.0 to v2.3 | Branded captive-portal Wi-Fi setup, chip-derived pairing code, OLED UI, Losant streaming, remote factory reset, watchdog, boot self-test, rotating status pages, `wifiRssi` telemetry |
+| GP_Node | v3.0 to v3.11 | Self-provisioning (no per-board secrets), then the entire battery system: corrected sense polarity, charging inference, percent smoothing, deep sleep, no-battery honesty, the optional VBUS mod |
+| GP_Combined | v4.0 to v4.3 | One image, both transports: the SX1262 LoRaWAN stack, NVS mode selection, OTAA with persisted nonces, the 9-byte payload, downlink handling, `provisionLoRa` key push, the tiered PRG button, stale-command grace, the authoritative transport tag, on-screen firmware version |
 
-```js
-supabase.auth.signUp({ email, password,
-  options: { data: { first_name, last_name, grower_type } } })
-```
+`GP_Combined/GP_Combined.ino` (v4.3) is the production image and the only one flashed onto shipping units. The walkthrough below covers it; where a mechanism was inherited unchanged from an earlier generation, the original reasoning is given here once.
 
-The metadata lands in `user.user_metadata` and flows into the UI (greeting name, avatar initial, grower-type badge in Settings). Sessions persist in browser storage and are observed with `onAuthStateChange`, so a refresh never logs anyone out.
+Two copies of the combined image exist on purpose: the working copy at the project root carries the real provisioning token and is never committed; the repository copy under `firmware/` is identical except for a placeholder token. Every firmware change is made to both, and the build is verified balanced (compiling, matching versions) before commit.
 
-## 6.2 The device registry
+## 8. The combined firmware, section by section
 
-The full schema, as deployed (also in `docs/growthpulse-supabase-schema.sql`):
+The image is a single annotated file of about 900 lines. One file is a deliberate choice at this scale: it can be reviewed top to bottom, pasted whole into the IDE, and handed to a teammate without explaining a build system. It merges two complete network stacks, so it overflows the default app partition; it is built with Tools, Partition Scheme set to a larger-app ("Huge App") layout.
 
-```sql
-create table if not exists device_registry (
-  claim_code         text primary key,
-  losant_device_id   text not null,
-  created_at         timestamptz default now()
-);
-
-alter table device_registry enable row level security;
-
-create policy "authenticated can read registry"
-  on device_registry for select
-  to authenticated
-  using (true);
+### 8.1 Boot path selection
 
-insert into device_registry (claim_code, losant_device_id)
-values ('4A7AC', '6a1fb486df527c8bf8d3324b')
-on conflict (claim_code) do nothing;
-```
-
-Reading it as a product artifact: this table **is the factory database**. Every manufactured unit gets one row at provisioning time, mapping the code shown on its screen to its cloud identity. Row-level security is the whole access model: authenticated users may look codes up (that is what claiming is), and nobody can write through the public anon key because no insert/update policy exists. Writes happen only through the service role in the dashboard or, later, a provisioning station.
+A `netmode` string in the NVS namespace `gp` selects the boot path: `wifi` (the default) or `lorawan`. Setting the mode always means writing NVS and rebooting; the firmware never tries to hot-swap stacks, because RAM is the real ceiling and only the chosen stack is ever initialized. The mode is set three ways, each writing the same flag:
 
-Why the anon key is allowed to be public: it is designed that way by Supabase; RLS policies are the enforcement layer. The key ships in the browser bundle (it is a `VITE_` variable) and grants exactly what the policies say and nothing more.
-
-## 6.3 The devices table: cloud-authoritative ownership
-
-The registry says which codes are valid; the **devices** table says who owns what. It makes claims cloud-authoritative (a claim follows the account to any browser instead of living in one browser's localStorage), enforces one-owner-per-unit, and gives the command endpoint something to authorize against. Schema as deployed (`docs/growthpulse-devices-schema.sql`):
-
-```sql
-create table if not exists devices (
-  id                uuid primary key default gen_random_uuid(),
-  user_id           uuid not null default auth.uid() references auth.users(id) on delete cascade,
-  claim_code        text not null unique,           -- one account per unit
-  losant_device_id  text not null,
-  name              text, location text, geo jsonb, grp text,
-  transport         text default 'wifi', plant text default 'generic',
-  irrigation        jsonb,
-  created_at        timestamptz default now()
-);
-
-alter table devices enable row level security;
-
-create policy "owner reads"   on devices for select to authenticated using (auth.uid() = user_id);
-create policy "owner inserts" on devices for insert to authenticated with check (auth.uid() = user_id);
-create policy "owner updates" on devices for update to authenticated using (auth.uid() = user_id);
-create policy "owner deletes" on devices for delete to authenticated using (auth.uid() = user_id);
-```
-
-Notes that matter:
-
-- **`claim_code` is `UNIQUE`**, so a second account claiming the same code hits a `23505` violation, which the store surfaces as "already claimed by another account." That is claim exclusivity in one constraint.
-- **`grp`** is the column name (`group` is a SQL reserved word); the app maps `r.grp <-> device.group`.
-- **`geo` and `irrigation` are `jsonb`**, so the plant's home coordinates and the full watering config (including `rainDelay`) ride in the row.
-- **Per-user RLS on all four verbs** means the browser talks to the table directly with the anon key and can still only ever see or change its own rows; there is no trusted server in this path, the database is the guard.
-- **`created_at`** is read into the device as `claimedAt`, which drives the report's "Everything" range and the activity timeline.
-
-A one-time migration lifts pre-ownership local claims into the table on first load: for each locally-stored claim it recovers the `claim_code` from the registry, inserts the row, and remaps that browser's journals and device-scoped alarms onto the new cloud id.
-
----
-
-# 7. The Backend (Netlify Functions)
-
-Netlify (netlify.com) hosts the static app and two serverless functions from `netlify/functions/`, bundled with esbuild per `netlify.toml`:
-
-```toml
-[build]
-  command = "npm run build"
-  publish = "dist"
-[functions]
-  directory = "netlify/functions"
-  node_bundler = "esbuild"
-```
-
-The functions exist for exactly one reason: **no Losant token may ever reach a browser.** The app calls same-origin endpoints; the tokens live in Netlify environment variables readable only by function code.
+- the setup portal's Connection field (type `lorawan` during Wi-Fi setup),
+- a Losant `setMode` command (reaches units that are on Wi-Fi),
+- a LoRaWAN downlink (reaches units that are on LoRaWAN).
 
-## 7.1 device-state.js, the read path
-
-```js
-export const handler = async (event) => {
-  const token = process.env.LOSANT_API_TOKEN;       // read-only token
-  const appId = process.env.LOSANT_APP_ID;
-  const deviceId = event.queryStringParameters?.deviceId;
-
-  if (!token || !appId) return { statusCode: 500, body: '{"error":"Server not configured"}' };
-  if (!deviceId)        return { statusCode: 400, body: '{"error":"deviceId required"}' };
-
-  const res = await fetch(
-    `https://api.losant.com/applications/${appId}/devices/${deviceId}/compositeState`,
-    { headers: { Authorization: `Bearer ${token}` } });
-  if (!res.ok) return { statusCode: res.status, body: '{"error":"Device not found"}' };
-
-  const s = await res.json();
-  const num  = (k) => (s[k] && typeof s[k].value === 'number'  ? s[k].value : null);
-  const bool = (k) => (s[k] && typeof s[k].value === 'boolean' ? s[k].value : null);
-  const reading = {
-    airTemperatureF: num('airTemperatureF'),
-    airHumidity: num('airHumidity'),
-    soilTemperatureF: num('soilTemperatureF'),
-    soilRaw: num('soilRaw'),
-    soilMoisturePercent: num('soilMoisturePercent'),
-    batteryPct: num('batteryPct'),
-    charging: bool('charging'),
-    time: s.soilMoisturePercent ? new Date(s.soilMoisturePercent.time).getTime() : Date.now(),
-  };
-  return { statusCode: 200,
-    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
-    body: JSON.stringify(reading) };
-};
-```
-
-Design notes: the `num`/`bool` guards convert anything missing or mistyped into `null`, which is the app's universal "no data" signal, the same null that means an unplugged DHT22. `Cache-Control: no-store` because a stale reading is worse than an extra request for live monitoring. The timestamp rides on the moisture attribute's report time so the app can show data age honestly.
-
-## 7.2 device-command.js, the write path
-
-```js
-export const handler = async (event) => {
-  if (event.httpMethod !== 'POST') return { statusCode: 405, ... };
-  const token = process.env.LOSANT_COMMAND_TOKEN;    // separate write token
-  const { deviceId, name = 'factoryReset' } = event.queryStringParameters || {};
-  if (name !== 'factoryReset') return { statusCode: 400, ... };  // allowlist
+A LoRaWAN boot with no stored keys falls back to Wi-Fi setup rather than bricking: a unit that cannot join anything always ends up somewhere a human can reach it.
 
-  const res = await fetch(
-    `https://api.losant.com/applications/${appId}/devices/${deviceId}/command`,
-    { method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, payload: {} }) });
-  ...
-};
-```
+### 8.2 Identity helpers
 
-Four defenses now: POST only, a one-entry command allowlist, the dedicated write token, **and an ownership check** (the former gap, now closed by §6.3). Before sending anything, the function takes the caller's forwarded Supabase session and queries the `devices` table for a row matching this `losant_device_id`; RLS returns only rows the caller owns, so zero rows means 403 and no auth header means 401:
+`chipUid()` extracts 24 bits of the factory-burned efuse MAC; `pairCode()` renders them as six uppercase hex characters, and `apSsid()` builds the setup hotspot name `GrowthPulse-XXXXXX` from the same value. One identity, three surfaces: the screen, the hotspot name, and the registry. The MAC is unique per chip, free, and permanent, which is the entire provisioning cost model: identity costs nothing at manufacture.
 
-```js
-const callerAuth = event.headers.authorization;          // the user's Supabase JWT
-if (!callerAuth) return { statusCode: 401, ... };         // must be signed in
-const own = await fetch(
-  `${supaUrl}/rest/v1/devices?losant_device_id=eq.${deviceId}&select=id`,
-  { headers: { apikey: supaKey, Authorization: callerAuth } });
-const rows = own.ok ? await own.json() : [];
-if (rows.length === 0) return { statusCode: 403, ... };   // not your device
-// ...only now send the Losant command
-```
+### 8.3 The OLED system
 
-The browser supplies the header from its live session (`factoryResetDevice` calls `supabase.auth.getSession()` and sends `Authorization: Bearer <access_token>`). The database, via RLS, is the authority; the function just relays its verdict.
+The V3's OLED hangs off a switched power rail: `oledInit()` drives Vext (GPIO36) LOW, waits 80 ms for the rail to settle, then initializes U8g2 with the V3's exact reset/clock/data pins. The generic constructor assumes default I2C pins and produces a blank screen, a classic first-day failure.
 
-## 7.3 Environment variables, the complete set
+In steady state the screen cycles through three pages, five seconds each:
 
-| Variable | Visible to | Purpose |
-|----------|-----------|---------|
-| VITE_SUPABASE_URL | browser bundle | Supabase project URL |
-| VITE_SUPABASE_ANON_KEY | browser bundle | public anon key; RLS enforces access |
-| LOSANT_APP_ID | functions only | Losant application id |
-| LOSANT_API_TOKEN | functions only, marked secret | read-only state token (also serves history queries) |
-| LOSANT_COMMAND_TOKEN | functions only, marked secret | command-capable token |
+| Page | Content |
+|------|---------|
+| Pair code | "PAIR CODE", the link state chip ("Wi-Fi ON", "LoRaWAN .."), the firmware version in small type under the link chip, and the code itself rendered with adaptive type |
+| Connection | The live link and its real signal: Wi-Fi dBm, or LoRa RSSI once joined, plus battery percent with charging marker, or "AC/USB" |
+| Readings | Air temperature and humidity, soil temperature, moisture percent; any absent probe renders "--" honestly |
 
-Set in Netlify under Site configuration, Environment variables; locally in the gitignored `.env`. The `VITE_` prefix is the line between public and private, enforced by Vite at build time. The two newer functions add **no new secrets**: `device-history` reuses the read-only `LOSANT_API_TOKEN`, and `render-pdf` reuses the Supabase pair to authenticate the caller and needs no Losant access at all.
+`drawBigCentered()` implements the adaptive type: it measures the code in bold 30, then 25, then 20 point, and draws the largest that fits 124 pixels. The pairing code is the one thing a customer must read off the hardware, so it gets the biggest legible rendering. The code never disappears after pairing, on purpose: re-pairing, resale, and support all need it, and it doubles as the serial number.
 
-## 7.4 device-history.js, the history path
+The firmware version on the pairing page (added in v4.3) earns its place: it confirms at a glance which build a unit runs, and after a reflash the new number on screen is the proof the flash took, with no serial monitor needed.
 
-Backs the report graphs. The app only holds a 60-reading in-memory ring, so anything longer than the last few minutes comes from Losant's time-series store. `GET ?deviceId&start&end` (ms epoch) issues a `POST /data/time-series-query` with the read-only token:
+Burn-in protection dims the panel after five idle minutes; any PRG tap restores full contrast. A boot self-test screen (held ten seconds so it can actually be read) shows OK or "--" per sensor before the unit goes online, which catches miswired benches before anyone stares at cloud dashboards.
 
-```js
-const MAX_POINTS = 240, MINUTE = 60000;
-const resolution = Math.max(MINUTE, Math.ceil((end - start) / MAX_POINTS / MINUTE) * MINUTE);
-// body: { start, end, resolution, aggregation:'MEAN',
-//         attributes:[air/soil...], deviceIds:[deviceId], order:'asc' }
-```
+### 8.4 The branded captive portal
 
-The resolution auto-scales so a report never carries more than ~240 chart points regardless of span (a year collapses into ~1.5-day buckets; a day stays at minute detail). The same disconnected-sensor sentinels handled everywhere else are cleaned to `null` here too (soil temp < -100, humidity <= 0, the DHT22 "temp 0 with no humidity" case, soil raw < 300), so a dead probe leaves an honest gap in the graph instead of dragging the averages. Empty lead/tail buckets (an "Everything" range that starts before the unit existed) are trimmed; interior gaps are kept so offline stretches stay visible.
+Two raw-string constants are injected into WiFiManager's portal: a `<style>` block restyling the stock pages with brand colors, and a branding block carrying the GrowthPulse logo as inline SVG, the wordmark, the tagline, and a welcome line. Inline SVG because the customer's phone is connected to the device's hotspot with no internet: every byte the portal shows must be served from the chip itself.
 
-## 7.5 render-pdf.js, the server-side report renderer
+`connectWiFi()` encodes the provisioning policy in one WiFiManager call plus carefully chosen settings:
 
-Produces a true vector PDF, crisp selectable text, from a finished report's HTML using headless Chrome. `POST { html, filename }`:
+- `autoConnect()` tries saved credentials, opens the branded hotspot if none work, and returns once associated. No custom state machine.
+- `setWiFiAutoReconnect(false)` and `WiFi.setSleep(false)` fix a real observed failure: while the portal is open the chip runs AP and STA simultaneously, and both background STA retry scans and modem power-save pull the radio off the AP channel. The symptom was the customer's phone hanging on "connecting..." to the hotspot for a minute or more. With these two lines the join completes in seconds.
+- `setConfigPortalTimeout(600)`: the 180-second default expired mid-demo while a phone was slow to surface the portal, restarting the AP underneath the user. Ten minutes is a human-paced window; on timeout the device restarts and reopens setup rather than wedging.
+- The portal also answers at **192.168.4.1** directly, the documented fallback when a phone suppresses captive-portal detection.
+- A "Connection" text field on the portal lets a user (or installer) type `lorawan` to flip the unit's mode at setup time.
+- The task watchdog is detached around `autoConnect()` (which legitimately blocks for minutes) and re-attached after.
 
-```js
-import chromium from '@sparticuz/chromium';   // Lambda-sized Chromium binary
-import puppeteer from 'puppeteer-core';
-// 1) auth-gate: verify the caller's Supabase token (GET /auth/v1/user) -> 401 if invalid
-// 2) launch chromium, page.setContent(html, {waitUntil:'networkidle0'})
-// 3) page.pdf({ format:'letter', printBackground:true, margin:{...} })
-// 4) return base64 PDF with Content-Disposition: attachment
-```
+### 8.5 Wi-Fi self-provisioning on the device
 
-It is **auth-gated** (a valid session is required) so it can't be abused as an open HTML-to-PDF service; it does not trust the HTML to name a device, it only confirms the caller is a signed-in user. `netlify.toml` keeps the native binary out of the esbuild bundle and ships it alongside the function:
+On the first Wi-Fi boot there is no saved Losant identity in NVS. `ensureProvisioned()` then calls `provisionFromBackend()`: an HTTPS POST of `{ code, token }` to the `provision-device` function, where `code` is the pairing code and `token` is the shared firmware provisioning token. The response carries a Losant device id, access key, and access secret, which are written to NVS and used for every subsequent boot. Provisioning retries every five seconds until it succeeds, with an OLED message pointing at the likely cause ("check internet").
 
-```toml
-[functions."render-pdf"]
-  external_node_modules = ["@sparticuz/chromium", "puppeteer-core"]
-  included_files = ["node_modules/@sparticuz/chromium/**"]
-```
+The TLS connection currently uses `setInsecure()` (no certificate pinning) to keep bring-up simple; pinning is a documented pre-production hardening item, because an active man-in-the-middle could otherwise intercept the provisioning response.
 
-This is the **preferred** download path. The client tries it first and falls back to in-browser rendering (see §9.10) if the caller isn't signed in (demo mode), the function is slow/unavailable, or it returns anything but a PDF, so the download always succeeds.
+### 8.6 Sensor reading
 
----
+`readSensors()` is shared by both transports:
 
-# 8. Identity and Claiming, End to End
+- DS18B20 and DHT22 failure sentinels (-196.6 F, NaN) pass through untouched; the cloud and app layers convert them to honest UI rather than the firmware guessing.
+- The soil ADC is averaged over 10 samples 10 ms apart, because single ESP32 ADC reads jitter by several counts. The 10-sample min/max spread doubles as a noise detector: a spread above 600 counts, or an average below 300, means no probe is connected (a floating pin reads low noise; a powered probe in air reads near its 3600 dry point), and the reading is zeroed so the pipeline reports "not connected" instead of noise.
+- `map(soilRaw, dryValue, wetValue, 0, 100)` runs dry-to-wet, which inverts the scale correctly since wet soil reads lower, and `constrain` clamps readings outside the calibration window instead of reporting 112 percent.
+- The battery percent is refreshed in the same pass (chapter 6).
 
-The complete journey of one unit from factory to a customer's dashboard:
+### 8.7 Wi-Fi telemetry
 
-1. **Factory (today: the bench).** Flash the firmware; read the pairing code from the OLED or Serial; create the Losant device and access key; insert the registry row mapping code to device id. For the demo unit: `4A7AC -> 6a1fb486df527c8bf8d3324b`.
-2. **Customer Wi-Fi setup.** Power on; the unit opens `GrowthPulse-XXXXXX`; the customer joins from a phone and submits home Wi-Fi on the branded portal; the unit stores credentials, connects, and starts streaming. No app, account, or cloud knowledge involved in this step.
-3. **Claim.** In the app: Connect a device, choose Wi-Fi or LoRaWAN gateway, name the plant, type its home city or ZIP, and enter the code from the screen. `claimDevice` uppercases and trims the code, looks it up in `device_registry`, **rejects unknown codes** with a human message, geocodes the home location (failure is non-fatal, weather just falls back), and adds the device with its `losantDeviceId` attached.
-4. **Live.** The store's polling loop begins fetching `device-state` for the new device. It renders as "waiting for the first reading" with dashes until real data arrives, never invented numbers, then flips online.
+`sendTelemetryWiFi()` publishes a JSON state document over MQTT: the five sensor values, `wifiRssi`, `batteryPct`, `charging`, and `transport: "wifi"`. The transport tag is stamped on every report and is authoritative: it is what stops a stale `loraRssi` left in the cloud composite from ever making the app display the wrong link after a switch (chapter 20, issue L8 family). The serial line mirrors one summary per cycle, which is the field calibration tool: no extra software needed to calibrate a probe.
 
-Why a typed code instead of fully automatic binding: during step 2 the phone is on the unit's hotspot with **no internet**, so it cannot reach the account backend to bind silently. A short displayed code typed once is the standard consumer-IoT answer (and what shipped); the zero-typing upgrade, where the portal carries a one-time account token that the unit POSTs to a bind endpoint on first connect, is specced in the Roadmap.
+The Wi-Fi loop sends every 3 seconds. That cadence is human-real-time for demos and stays far inside Losant limits; LoRaWAN has fundamentally different rules (section 8.9).
 
-Why validation matters: an early build accepted any string as a pairing code and manufactured a fake-looking device for it. The registry lookup closed that, a typo now produces "That pairing code wasn't recognized" instead of a ghost plant.
-# 9. The Web Application, File by File
+### 8.8 Cloud commands and the stale-command grace window
 
-Stack: React 18 + Vite, recharts for charts, lucide-react for icons, no router (a five-tab state machine), one hand-written CSS design system. This chapter covers every source file.
+`handleCommand()` accepts exactly three commands and ignores everything else:
 
-## 9.1 Entry: index.html and main.jsx
+| Command | Payload | Effect |
+|---------|---------|--------|
+| `factoryReset` | none | Wipe saved Wi-Fi, reset mode to Wi-Fi, reboot into the setup hotspot |
+| `setMode` | `{ "mode": "wifi" or "lorawan" }` | Write the mode flag and reboot into that stack |
+| `provisionLoRa` | `{ joinEUI, devEUI, appKey }` as hex strings | Validate lengths, store the OTAA keys in NVS, reboot into LoRaWAN |
 
-`index.html` carries the PWA surface: `viewport-fit=cover` (content may extend into iPhone safe areas, which the CSS then respects), `theme-color`, the SVG favicon, `manifest.webmanifest`, `apple-touch-icon.png`, and the three Apple metas (`apple-mobile-web-app-capable`, status-bar style, app title) that make Add to Home Screen produce a real full-screen app. `main.jsx` is the standard five-line React root with StrictMode.
+All three are gated by a 12-second grace window after connecting to Losant. The reason is chapter 20, issue L9: the broker redelivers a queued command the instant a device reconnects, so a stale `provisionLoRa` or `factoryReset` from an earlier session would yank a unit into a mode change, or wipe its Wi-Fi, on every connect, producing an endless Wi-Fi/LoRaWAN bounce. A real owner action arrives during steady operation; anything delivered in the first seconds of a connection is a replay and is logged and dropped.
 
-## 9.2 supabaseClient.js
+`factoryReset` is the device half of the resale flow: the owner taps Factory reset in the app, the cloud delivers the command over the existing MQTT connection, and the unit visibly wipes itself and reopens setup for the next owner. Commands reach online devices only; there is no offline queue on the Losant path, which is why the app's confirmation dialog documents the PRG-button fallback.
 
-Creates the client from the two `VITE_` variables and exports `supabaseConfigured` so the app can render a friendly "accounts service not connected" notice instead of crashing when env vars are missing (fresh clones, CI).
+### 8.9 The LoRaWAN path
 
-## 9.3 auth/AuthProvider.jsx
+**Radio bring-up.** The SX1262 needs three V3-specific facts to even start: the exact SPI pins, a non-zero TCXO voltage (the V3 clocks the radio from a temperature-compensated oscillator powered through the radio's DIO3 pin; RadioLib's 1.6V default works, and a zero value produces init error -707), and `setDio2AsRfSwitch(true)` because DIO2 drives the antenna switch (without it, transmit appears to work and nothing is ever received). `setDutyCycle(false)` is correct for US915, which uses fair-use airtime rather than a legal duty cycle.
 
-A context with `{ user, isDemo, authReady, login, signup, logout, startDemo, configured }`.
+**OTAA, the two-call trap.** In RadioLib, `beginOTAA()` only sets the keys and returns success without joining; `activateOTAA()` performs the actual join. The combined image originally called only the first, so keys were set, no join ever happened, and the first uplink failed with -1101 "session not active" (chapter 20, issue L2). The fix matches the proven standalone sketch: restore saved join nonces from NVS, `beginOTAA`, then loop on `activateOTAA` with a 10-second backoff until joined, persisting nonces between attempts so the DevNonce counter always increments. The PRG button stays responsive inside the retry loop, because a node that cannot join must still be recoverable by hand.
 
-- On mount: `getSession()` restores any existing session, then `onAuthStateChange` keeps `user` current; `authReady` gates the first paint so the app never flashes the login for an already-signed-in user.
-- `signup(email, password, meta)` forwards profile metadata (first/last name, grower type) into Supabase user metadata.
-- **Demo mode** is a parallel fake session: `startDemo()` sets a flag and the provider serves `DEMO_USER { id: 'demo' }` as the effective user. Demo is therefore just another user id to the rest of the app, which is the trick that keeps demo data and real data perfectly separated (see storage namespacing).
+**DevNonce persistence.** LoRaWAN 1.0.4 requires each join request to carry a DevNonce higher than any the network has seen. The nonces live in a dedicated NVS namespace and are saved after every join attempt and every uplink. A reflash that wipes NVS restarts the counter, which the network would silently reject until the counter caught up; the backend closes that hole by setting `resets_join_nonces` on the Join Server at provision time (chapter 20, issues L13 and L14).
 
-## 9.4 App.jsx: Gate and Shell
-
-`Gate` is the top-level decision: unconfigured notice, loading, `<Login/>`, or `<AppProvider key={user.id}><Shell/></AppProvider>`. The `key={user.id}` is load-bearing: changing user identity remounts the entire store so no state can leak between accounts or between demo and real.
-
-`Shell` owns: the tab state machine (`live | history | alarms | devices | settings`), the theme hook (`data-theme` attribute driven by the setting, with an `auto` mode that tracks the OS via `matchMedia`), the app bar (selected device name and location, the share-report button, the avatar), the bottom tab bar (which CSS transforms into a desktop sidebar at 860px), the alarm badge, and the toast system. Toasts work by diffing: each render computes the set of currently tripped alert keys (`deviceId:ruleId`); any key that exists now but not in the previous set raises a 4-second toast naming the device and rule. Diffing keys rather than counts means three simultaneous trips do not collapse into one anonymous notification.
-
-When `devices.length === 0`, Shell returns `<Onboarding/>` instead of the tab UI, the claim-first welcome screen. Onboarding renders inside the full-page centered wrapper, not the shell, because the desktop shell grid once auto-placed it into the 240px sidebar column (a real shipped bug, documented in the runbook).
-
-## 9.5 store/AppContext.jsx, the store
-
-One context provides everything; there is no Redux because one provider with `useCallback` actions is sufficient at this scale.
-
-**Persistence and isolation.** `load`/`save` wrap localStorage with the key scheme `growthpulse:<userId>:<name>`. Combined with the provider remount on user change, every account (and the demo) has fully isolated devices, settings, alarms, journals, gateways, and tier.
-
-**Device model.**
+**The 9-byte uplink.** LoRaWAN frames are tiny (11 bytes of application payload at the slowest US915 data rate), so the node packs binary, not JSON:
 
 ```
-{ id, name, location, geo {lat, lon, label}, group, transport: 'wifi'|'lorawan',
-  plant, irrigation {mode, targetMoisture, durationSec, enabled, pausedUntil, rainDelay},
-  losantDeviceId?,           // present = a real claimed unit
-  claimedAt,                 // ms epoch; when the plant joined the account
-  reading, history[<=60], hasData, online, lastSeen, pumpRunning }
-```
-
-`buildDevice` normalizes any persisted shape: legacy `ethernet` transports coerce to `wifi`, defaults fill missing fields, and, critically, **claimed devices initialize with a null reading, `hasData:false`, `online:false`**. They render as "Waiting for the first reading" with dashes. Only the arrival of real cloud data flips them live. Demo devices initialize from `seedReading()` instead. This split exists because an early bug let fake-looking data appear for devices that had never reported.
-
-**Cloud-authoritative devices.** For real accounts, devices are not seeded from localStorage; the store initializes to `[]` and a `devicesReady` flag gates the UI while it loads `supabase.from('devices').select('*').order('created_at')`. `rowToDevice(r)` maps a table row into the device shape (`r.grp -> group`, `r.created_at -> claimedAt`, the row `id` as the device id). `syncDevice(id, patch)` pushes changed fields back (name, location, geo, grp, transport, plant, irrigation). Demo mode is the only path that still persists to localStorage. The one-time legacy-claim migration described in §6.3 runs here.
-
-**The live loop.** One `setInterval` at the user's refresh rate. Each tick: claimed devices are fetched in parallel from `device-state` (errors keep the previous reading; a `devicesRef` lets the closure read current state without re-arming the interval), and demo devices advance via `nextReading`, a bounded random walk. Updates append to a 60-entry rolling history that powers trends and the metric detail charts. Staleness flips `online:false` after 45 s of silence on Wi-Fi (15 min on LoRaWAN, which reports far less often by design).
-
-**Weather, pinned to the plant, location optional.** The selected device's stored `geo` drives an Open-Meteo forecast call (current temperature and weather code, daily rain probability, UV, high; unit-aware). If the device has **no** `geo`, the store sets `weather = { needsLocation: true }` and stops, it never reads browser/GPS location and never invents a default city. The card then invites the user to add a location. This is deliberate: customers who don't want to share where they live are not forced to, and the only feature that actually needs a location (rain delay) is the one that asks for it, with the reason shown. The effect re-runs when units or the pinned coordinates change. It is still the answer to the vacation problem: the forecast describes where the plant lives, not where the owner is standing.
-
-**Actions, each one line of intent:**
-
-- `addDevice` (demo only): adds a simulated device.
-- `claimDevice(code, name, place, transport)`: registry validation, optional geocode, then for real accounts an `insert` into the `devices` table (a `23505` unique-violation becomes "already claimed by another account"); demo adds locally. Returns an error string or null, which the claim sheet renders.
-- `setDevicePlant`, `updateDevice` (general patch: rename, location with re-geocode, geo, group, transport, all mirrored to the cloud via `syncDevice`).
-- `setIrrigation(id, patch)`: merges the watering config (including `rainDelay`) and syncs the whole `irrigation` object to the row.
-- `removeDevice(id)`: removes the device, **purges** its journal entries and device-scoped alarm rules, and `delete`s the cloud row (releasing the claim so the unit can be re-claimed). A resold or deleted unit leaves nothing behind.
-- `factoryResetDevice(id)`: attaches the caller's session token, POSTs the ownership-checked `factoryReset` command (§7.2), then `removeDevice`. The confirmation dialog carries the data-loss disclaimer and the offline PRG fallback.
-- `setIrrigation`, `runPump`: watering state and the simulated pump run (real pump control becomes a Losant command at the backend phase).
-- Journal: `addJournalEntry`/`removeJournalEntry`, keyed by device id, entries `{id, date, photo, note}` with photos as downscaled data URLs.
-- Gateways: `addGateway`/`removeGateway`, the Farm Kit bookkeeping list.
-- Alarms: `addAlarmRule`, `addAlarmRules` (bulk, used by auto-set), `updateAlarmRule`, `removeAlarmRule`.
-- `updateSettings`, `setTier`, plans sheet open/close.
-
-The provider also derives the display identity: prefer `user_metadata.first_name + last_name` from signup, fall back to the email prefix, and expose `growerType` for the Settings badge.
-
-## 9.6 store/helpers.js, the domain brain
-
-- `METRICS`: per-metric metadata, label, unit, icon, color, slider min/max, and the default `good`/`warn` bands. `rainChance` exists as a pseudo-metric so rain can participate in the alarm system without being a device sensor.
-- `PLANTS` (re-exported from `plants.js`, the searchable catalog with categories, scientific names, emoji, and per-plant range overrides). `rangesForDevice` layers the plant's ranges over the defaults, which is how "ideal" becomes species-relative everywhere at once.
-- `statusOf(key, value, ranges)`: inside good = good; inside warn = warn; else critical. This single function colors the entire product.
-- `metricConnected(key, reading)`: the disconnected-sensor detector, built from measured failure signatures: soil temperature below -100 (the DS18B20 -127 C sentinel), null values (DHT22 absent), humidity of zero or below (physically impossible from a working DHT22), and soil raw under 300 (a floating or unpowered probe; a real powered probe in air reads near its dry point of ~3600).
-- `healthScore`: good=100, warn=66, critical=28, averaged over **connected** metrics only, so a missing probe neither drags down nor props up the score. The weights make a single critical metric visibly hurt (one critical among four healthy reads 82, not 95).
-- `recommendations`: ordered advice. Missing-sensor fix-its first (each names the exact pin and component to check), then battery warnings (warn at 20 percent, critical at 10, suppressed while charging or on AC), then plant-care advice derived from the bands, then the all-good line only if nothing else fired.
-- `powerInfo`: null `batteryPct` means AC (true for today's USB units); otherwise battery percent plus charging flag.
-- Mock generators: `seedReading` and `nextReading` (bounded random walk; soil simulated in raw counts and converted exactly like the firmware does, same DRY/WET constants). `buildSeries` synthesizes hour/day/week/month chart data centered on the plant's ideal band for the in-app metric-detail sheets and the demo report; real reports now pull genuine long-range history from the cloud via `device-history` (§7.4).
-- `activeAlerts(devices, rules, weather)`: evaluates enabled rules per device (or once against the forecast for `rainChance` rules) and returns the tripped set used by the banner, badge, and toasts. `alarmsFromPlant` generates the one-tap starter rules from the plant's good band.
-- Display helpers: `convertTemp`/`displayValue`/`displayUnit` (F-to-C at the display layer only, storage stays Fahrenheit so units switching never mutates data), `trendOf` (last two history points: up, down, flat).
-- `TRANSPORTS`: Wi-Fi and LoRaWAN. Ethernet was removed because current hardware has no port; honest options only.
-
-## 9.7 store/tiers.js
-
-Free ($0: 3 devices, core monitoring), Plus ($4.99/mo: 10 devices, weather rain gauge), Pro ($9.99/mo: unlimited, automated irrigation incl. rain delay, LoRaWAN positioning). Tiers are feature flags consumed across the app (`tier.weather`, `tier.irrigation`, `tier.deviceLimit`); demo mode runs on pro so prospects see everything; real accounts default to free with polished locked-state upgrade cards. Rain delay lives inside `tier.irrigation` (Pro) and is additionally gated at runtime on the node having a location, since it depends on the forecast.
-
-## 9.8 Components
-
-- **UI.jsx**, the primitive kit: icon maps (`MetricIcon`, `TransportIcon`), `PowerBadge` (AC plug or color-stepped battery icon, compact mode for tight cards), `Pills` (segmented control, supports disabled options with hint tooltips, used for the LoRaWAN-aware refresh rates), `Toggle`, `Slider`, `Stepper`, `Gauge` (the SVG moisture dial), `statusColor`.
-- **Login.jsx**: sign-in and sign-up in one card. Signup adds first/last name (side by side), confirm-password with match and minimum-length validation, and the grower-type chip picker; submits metadata through `signup`. Enter submits; errors render inline; the demo button sits under the primary action.
-- **Onboarding.jsx**: the empty-account welcome with Connect a device and Log out.
-- **ClaimDeviceSheet.jsx**: the pairing flow described in chapter 8, including the Wi-Fi vs gateway chips whose helper text teaches the cadence trade-off (seconds vs minutes, battery life).
-- **AddDeviceSheet.jsx**: demo-only simulated device creation.
-- **GatewaySheet** (in DevicesView): name plus label code, with plug-into-router guidance.
-- **WeatherCard.jsx**: maps Open-Meteo WMO weather codes to label/icon/color (`describe()`), shows temperature, condition, location, rain chance and high, plus contextual notes: a rain note suggesting skipped watering at 50 percent or more, a sun/heat note at high UV or heat. When `weather.needsLocation` it renders an "add this plant's location" prompt with an inline `SetLocationInline` instead, no fake city, no GPS request.
-- **SetLocationInline.jsx**: a small self-contained control (city/ZIP input + button) that geocodes via `geocodePlace` and pins the result to the device with `updateDevice`. Reused by the weather card and the rain-delay gate so the customer can add a location without leaving what they're doing; an `onDone` callback lets the rain-delay gate immediately enable the feature once a location is saved.
-- **Chart.jsx**: the recharts area chart, gradient fill, ideal-band `ReferenceArea`, max and average reference lines, animation off for live data.
-- **GrowthJournal.jsx**: photo strip plus timeline sheet; photos are downscaled to thumbnails client-side (`fileToThumb`) before storage so localStorage stays manageable; capture attribute opens the camera on phones.
-- **IrrigationCard.jsx**: manual/auto/schedule modes, target-moisture slider, pump duration stepper, Water now (simulated pump bumps moisture), the rain-pause banner with resume, and the **rain delay** card. Rain delay (skip auto-watering when rain is forecast) is gated on the node having a `geo`: the toggle is disabled without one and a warnbox explains that the feature needs *this specific plant's* home location for the forecast, with an inline `SetLocationInline` (`onDone` enables rain delay the moment a location is saved). The auto-mode "skips when rain is forecast" line only appears when rain delay is actually on.
-- **ExportSheet.jsx**: the report options sheet (period presets / custom from-to / "Everything", per-plant checkboxes when >1 device, per-sensor checkboxes). On generate it fetches each chosen plant's history (`device-history` for real units; a local mock series for demo plants) and calls `downloadAccountPdf` or `openAccountExport`. While working it swaps the form for a spinner + phase label ("Gathering your sensor data…" -> "Rendering your PDF…") and blocks close/backdrop so the in-flight render can't be orphaned or double-fired.
-- **PlansSheet.jsx**: pricing cards from `TIERS`; in demo, buying sets the tier instantly and shows a thank-you (real billing is a roadmap item and the sheet says so).
-- **PlantPicker.jsx**: search across name, scientific name, and category; results grouped by category; each row previews its ideal moisture band; picking re-ranges the whole app via `rangesForDevice`.
-
-## 9.9 Views
-
-- **LiveView**: the dashboard. `HERO` (three headline metrics) and `CHIPS` (four sensor chips) are key arrays mapped against `metricConnected`, connected values render colored by status, disconnected ones render gray dashes and "not connected" and are not tappable. The gauge/health card includes transport, power badge, and location. Weather and irrigation render or show their locked upgrade cards per tier. `RainPausePrompt` offers 24/48-hour watering pauses when rain probability is 50 percent or more. `MetricDetail` is the tap-through chart sheet. `DeviceWaiting` replaces the whole dashboard for a claimed device that has not reported yet.
-- **HistoryView**: per-metric cards for HOUR/DAY/WEEK/MONTH with max/avg/min and the ideal band, unit-aware.
-- **AlarmsView**: live alert banner and cards, the auto-set button (plant-derived starter rules), and rule cards with enable toggle, device scope dropdown, above/below pills, and a threshold slider bounded by the metric's min/max.
-- **DevicesView**: grouped device cards (group headings plus "Other plants"; flat when no groups exist), the gateways section, both add flows, and the edit sheet: name, home location (re-geocoded on save), group (with datalist suggestions from existing groups), connection type with the honest switching note, and the danger zone, Remove and Factory reset, each behind a confirmation screen with explicit data-loss language.
-- **SettingsView**: plan card, units, theme, the LoRaWAN-aware refresh-rate pills with the battery-drain note, notification channels (push/email/SMS with addresses), and the account card with name, grower badge, **Download report (PDF)** (opens `ExportSheet`), and sign-out. The old machine-readable JSON export link was removed, the branded report is the one export customers actually want.
-
-## 9.10 Utilities
-
-- **geocode.js**: Open-Meteo's free geocoder; returns `{lat, lon, label}` or null; the label ("Davie, Florida") doubles as the device's display location.
-- **report.js**: the original single-plant snapshot report (header, plant identity, health stat, a sensor table of current values plus min/avg/max from in-memory history, weather, journal photos), opened in a new window for `window.print()`. Still used for the quick per-plant share.
-- **accountExport.js**: the full account/plant **report** system, the bulk of the recent work. `buildReport()` assembles one branded HTML document from the selected plants and their fetched histories: a letterhead and account/period block, then per-plant **inline-SVG line charts** (one per selected sensor, ideal-band shading, min/avg/max, segmented at nulls so offline gaps and disconnected sensors show honestly), a chronological **activity timeline** (claimed date, first data, journal entries), and the device/gateway/alarm/preferences/journal summary tables. All chart CSS is scoped under `.gp-doc` / `.gpr-*` so the document can be rendered inside the live app page (for client-side PDF) without restyling the app, a real bug we hit when the report's `.brand` collided with the app's. Three delivery paths share that one document:
-  - `openAccountExport()` writes a standalone HTML doc to a new tab and auto-prints (sharpest text, paper-friendly).
-  - `downloadAccountPdf()` is the one-tap download: it **tries the server renderer first** (`render-pdf`, true vector PDF, §7.5), and on any failure or in demo mode **falls back** to `clientPdf()`.
-  - `clientPdf()` renders the report off-screen and rasterizes it with `html2pdf.js` (dynamically imported so it never weighs down normal app loads; PNG encoding and a 2–3x scale clamped to stay inside mobile-Safari's canvas limit). Slightly softer than the server's vector output but always available offline.
-
-## 9.11 The design system (index.css)
-
-- **Tokens**: `--bg #eef0f2`, `--card #fff`, ink scale (`--ink #2c3e50`, two muted steps), brand `--green #2ecc71` with dark accent `--green-d`, status colors, 22px card radius, layered soft shadows, `--maxw 480px` for the phone column.
-- **Layout**: `.shell` is the phone-width column; at 860px it becomes a grid (`240px` sidebar plus content, `grid-template-areas`), the `.tabbar` converts from bottom bar to sidebar, and content widens. The app bar is sticky with backdrop blur.
-- **Primitives**: card, badge (now `white-space: nowrap` after a wrapping bug), pills (with disabled state), chips, device cards (meta row wraps as a whole, reading column protected), sheets (bottom drawers with grab handle and slide-up animation, safe-area padded), overlay, toasts, skeletons, the warnbox (destructive confirmations), rolechips (signup picker), danger zone, fieldlabels.
-- **Dark theme**: `:root[data-theme='dark']` overrides the token set; `auto` follows the OS.
-- **Forms**: `input, select, textarea, button { font-family: inherit }`, browsers default form controls to system fonts with different metrics, which users perceive as "the typing looks shifted."
-- **Safe areas**: `env(safe-area-inset-*)` padding on the app bar, tab bar, login, and sheets so the installed PWA clears the iPhone notch and home indicator.
-
-## 9.12 PWA assets
-
-`manifest.webmanifest` (name, standalone display, theme/background colors, 192 and 512 icons with maskable purpose) plus `apple-touch-icon.png` at 180px. The PNGs are rendered from the brand SVG onto a white matte with the sharp library at build-tooling time (iOS renders transparency as black, hence the matte).
-# 10. End-to-End Sequences
-
-How the layers cooperate for each major operation, useful as integration documentation and as a debugging map.
-
-**First boot and provisioning.** Power on, OLED "Starting up", boot-time PRG check, banner with pairing code, sensors begin, `connectWiFi()` finds no saved credentials, AP callback flips the OLED to join instructions, customer joins the hotspot, portal serves the branded config page (or 192.168.4.1 manually), credentials saved, association succeeds, OLED shows the pair code with "..", `connectLosant()` brings up MQTT, OLED flips to "ON", telemetry begins on the 3-second cadence.
-
-**Claim.** App: Connect a device, transport choice, name, optional location, code. Store: registry SELECT by code (RLS-permitted read), reject if unknown; for a real account `insert` a `devices` row (unique `claim_code` enforces single ownership, a `23505` is surfaced as "already claimed"); geocode the place if given; add the device with `losantDeviceId`/`geo`/`claimedAt` and select it. UI shows DeviceWaiting until the first poll returns data, then the dashboard goes live.
-
-**Live tick.** Interval fires, claimed devices fetch `device-state` in parallel, nulls and sentinels flow through untouched, readings append to history, trends/health/insights recompute, `metricConnected` decides which slots render as data versus "not connected."
-
-**Alarm trip.** A reading crosses a rule threshold. In-app: `activeAlerts` includes it, the Alarms tab badge and banner update, the Shell's key-diff raises a toast. Out-of-app: the Losant workflow's conditional passes and the email/SMS node fires (subject to the one-per-minute email rate limit). Two independent layers, by design.
-
-**Factory reset.** Edit device, danger zone, Factory reset, confirmation with the disclaimer, `factoryResetDevice`: attach the caller's Supabase session, POST device-command (POST + allowlist + write token + **ownership check** against the `devices` table), Losant delivers `factoryReset` over MQTT, firmware shows "Reset by owner", wipes Wi-Fi, reboots into the setup hotspot; meanwhile the app removes the device, deletes its cloud row (releasing the claim), and purges journal and device-scoped alarms. Offline unit: command is lost, PRG hold covers it, dialog says so.
-
-**Report export.** Settings -> Download report -> `ExportSheet`: pick period / plants / sensors. On generate, fetch each plant's history (`device-history` per real unit, in parallel; mock series for demo), build the report via `accountExport.buildReport`. **Download PDF**: `downloadAccountPdf` POSTs the HTML to `render-pdf` (auth-checked headless-Chrome vector PDF) and saves the returned blob; on any failure or demo mode it falls back to `clientPdf` (html2pdf raster). **Print report**: `openAccountExport` opens the standalone HTML and auto-prints. A spinner with phase labels covers the wait and the sheet is close-locked until done.
-
----
-
-# 11. Debugging Runbook
-
-Every failure below was actually encountered during development. Symptoms are exact.
-
-| Symptom | Cause | Fix |
-|---------|-------|-----|
-| Soil temperature -196.6 F | DS18B20 absent or, most often, missing/misplaced 4.7k pull-up (it is -127 C, the Dallas disconnected sentinel) | Bridge data and 3V3 with 4.7k; verify probe wiring; the app's insight names this exactly |
-| Air temp/humidity nan or null | DHT22 absent or data wire loose | Check pin 5 and the module's pull-up |
-| Soil moisture pinned at 100 percent, raw ~120, ignores water | Probe powered at 3.3V: NE555 oscillator dead below ~4V (LED still lights) | Power probe VCC from the 5V pin |
-| Soil raw flat 0 on GPIO1 | GPIO1 is the V3 battery-sense net | Use GPIO2 (firmware `SOIL_PIN 2`) |
-| Floating ADC reads few-hundred noise, "looks alive" | Nothing driving the pin; ADC noise is normal | Judge by response to known voltage (jumper test: 3V3 reads ~4095, GND ~0), not by presence of a number |
-| 1-Wire scanner prints garbage addresses during wire taps | Contact bounce parsed as devices; real DS18B20 addresses start 0x28 | Proves pin and code alive; fix the physical bus |
-| Phone hangs "connecting..." to the setup hotspot | AP+STA channel hopping from background retries and modem sleep | `setWiFiAutoReconnect(false)`, `WiFi.setSleep(false)` (in firmware) |
-| Captive portal never pops | Phone's portal detection suppressed (cellular data on, OS quirk) | Browse to 192.168.4.1; turning off cellular data helps |
-| Portal vanished mid-setup | Old 180 s portal timeout rebooted the AP | Timeout is now 600 s |
-| Board keeps joining old Wi-Fi instead of opening setup | Saved credentials still valid | Hold PRG 3 s (or PRG at power-on) to wipe |
-| Upload dies: "chip stopped responding", exit status 2 | 921600 baud over a marginal cable | Upload speed 115200; PRG+RST for download mode; better cable |
-| No serial port appears at all | CP210x driver missing | Install Silicon Labs CP210x VCP driver |
-| `setPreloadWiFiScan` compile error | Setter absent from released WiFiManager (2.0.17) | Delete the line; the other two portal fixes carry the load |
-| Compile error: a file path inside the code | Accidental paste into the editor buffer | The error's caret points at it; delete the line |
-| Cloud email alert "didn't fire" | One-per-minute Losant email rate limit, or spam folder | Space test readings a minute apart |
-| 404 "Application not found" from Losant REST | Token JWT subject is not the application id | App id comes from the dashboard URL, not from inside the token |
-| Junk pairing code created a device (historic) | No validation | Registry lookup now rejects unknown codes |
-| Claimed device shows fake-looking values (historic) | Devices seeded with simulated data | Claimed devices now start empty and honest |
-| Welcome screen squeezed against the left edge on desktop (historic) | Onboarding rendered inside the shell grid, auto-placed into the 240px sidebar cell | Onboarding uses the full-page centered wrapper |
-| Badge text wraps mid-word, card columns collide (historic) | Meta row could not wrap; badges could break internally | `white-space: nowrap` on badges, wrapping meta row, protected reading column |
-| Typed text in fields looks subtly off | Form controls default to system fonts | `input/select/textarea/button { font-family: inherit }` |
-| Plant report tab never opens | Popup blocked | Allow popups for growthpulsecloud.com once |
-
----
-
-# 12. Decision Log
-
-| Decision | Reasoning |
-|----------|-----------|
-| Pairing code derived from the chip MAC and shown on the OLED | Unique per unit with zero provisioning cost; the customer reads it off the device; doubles as a serial number |
-| Registry table validates every claim | Typos cannot create ghost devices; the table is the future factory database |
-| Soil sensor on GPIO2 | GPIO1 is wired to battery sense; measured flat 0 |
-| Soil probe powered at 5V | NE555 modules do not oscillate below ~4V; output stays ADC-safe |
-| Sentinels pass through the pipeline untouched | The app converts them to honest "not connected" UI with fix-it hints; hiding them would mask hardware faults |
-| Claimed devices start with no data | Never display invented numbers; trust is the product |
-| Weather pinned to a per-device geocoded home | The forecast must follow the plant, not the traveling owner |
-| Location is optional; never read browser/GPS; no default city | Customers who won't share location aren't blocked; we don't fabricate a place we can't justify |
-| Rain delay is the only location-gated feature, and it asks at point of use | The one feature that genuinely needs a forecast is where we request the location, with the reason shown, and it names the node that still lacks one |
-| Full report = cloud history + inline-SVG graphs + timeline, replacing JSON export | A branded report with graphs is what customers actually use; raw JSON was noise for ~99% of them |
-| Report CSS scoped under `.gp-doc`/`.gpr-*` | The client-side renderer mounts the report inside the live app; unscoped class names collided with the app (centered logo bug) |
-| Server-side PDF (headless Chrome) with a client raster fallback | Vector text is sharpest; the fallback guarantees the download always works (offline, demo, cold function) |
-| `render-pdf` is auth-gated | Prevents abuse as an open HTML-to-PDF service while needing no Losant access |
-| Cloud-authoritative ownership via a `devices` table with per-user RLS | Claims follow the account across browsers, enforce one owner per unit, and give `device-command` something to authorize against |
-| History resolution auto-scaled to <=240 points | Reports stay readable and responses stay small whether the span is a day or a year |
-| Health score excludes disconnected sensors; weights 100/66/28 | A missing probe must not bias the score; one critical metric must visibly hurt |
-| Two Losant API tokens (read-only and command) | Least privilege on the hot read path |
-| All cloud tokens live in serverless functions | No credential ever ships in a browser bundle; `VITE_` prefix is the boundary |
-| Command endpoint allowlists `factoryReset` | Bounds the blast radius of an as-yet-unauthenticated endpoint |
-| Factory reset = cloud command + local purge + explicit disclaimer | A resale flow that physically readies the unit and leaves no data behind |
-| Portal: 10-minute timeout, no auto-reconnect, no modem sleep | Fixes the observed slow-join and mid-setup restart failures |
-| PRG 3-second hold replaces the PRG+RST timing dance | Customers reliably failed sub-second button choreography |
-| Per-user localStorage namespacing plus provider remount on user change | Account isolation on shared browsers, and demo isolation for free |
-| Demo as a fake user id rather than a flag sprinkled through code | One mechanism gives complete data separation |
-| Ethernet removed from the UI | Current hardware has no port; honest options only |
-| LoRaWAN-aware refresh options with battery notes | The UI teaches the trade-off where the user makes the choice |
-| Reports via the browser print pipeline | Zero dependencies; Save-as-PDF, paper, and share for free |
-| One-file firmware | Reviewable top to bottom; trivially flashable and handover-friendly at this scale |
-
----
-
-# 13. Known Limitations and Roadmap
-
-1. **~~Per-unit cloud provisioning.~~ DONE (§14.2).** Boards self-provision at first boot: each posts its chip-derived pairing code plus a shared firmware token to `provision-device`, which creates (or reuses) a per-board Losant device and returns a device-scoped access key. One image, no per-board secrets, no flash-time station.
-2. **~~Server-side device ownership.~~ DONE (§6.3, §7.2).** The `devices` table with per-user RLS is live: ownership is cloud-authoritative, syncs across browsers, enforces claim exclusivity, and `device-command` now verifies the caller owns the target before sending.
-3. **Zero-typing auto-bind.** The portal carries a one-time account token; the unit POSTs it to a bind endpoint on first connect. Claim codes are the shipping-grade interim.
-4. **~~LoRaWAN bring-up.~~ DONE (§14).** The combined firmware joins LoRaWAN through a ThinkNode G1 gateway on The Things Stack; uplinks route through the `lorawan-uplink` webhook into the same Losant device; transport switching is automated in both directions from the app; and gateways auto-register on the network. See the new §14 and the LoRaWAN System and Debugging Report.
-5. **~~Battery telemetry.~~ DONE (§14.11).** GPIO37-controlled battery sense (polarity-corrected for this board), inferred charging state, smoothed percent, and an optional VBUS divider for true USB-versus-battery detection. `batteryPct`/`charging` flow through both transports.
-6. **~~Durable history.~~ DONE (§7.4).** Reports now query Losant's time-series store through `device-history` for full-period graphs; the 60-reading in-memory ring remains only for the live trend/detail sheets.
-7. **Web push notifications** for alarm trips, complementing cloud email/SMS.
-8. **Billing.** Tiers are functional feature gates; Stripe integration replaces the demo "buy" path.
-9. **Family sharing.** Multiple accounts per garden, now unblocked by item 2.
-10. **Rain-delay actuation.** The rain-delay flag, location gating, and pause UX are in; wiring it to actually suppress real pump commands lands with the irrigation backend.
-11. **Group-level report select.** Reports pick per node; a "whole group" shortcut is the next convenience once accounts run many nodes per zone.
-
----
-
-# 14. Dual-Transport System: Self-Provisioning, Combined Firmware, and LoRaWAN
-
-This section documents everything added after the June 5 revision: how a board gets its own cloud identity with no per-board secrets, the single image that runs either Wi-Fi or LoRaWAN, and the full LoRaWAN path through The Things Stack into the same Losant device the app already reads. The companion **GrowthPulse LoRaWAN System and Debugging Report** carries the chronological bug-by-bug record; this section is the reference architecture.
-
-## 14.1 Two transports, two clouds, one device
-
-GrowthPulse supports two ways for a node to reach the internet, and uses two managed clouds.
-
-- **Losant** is the device cloud and the single source of truth the app reads. Every node, Wi-Fi or LoRaWAN, is represented as exactly one Losant device. This is the design choice that lets a node change transports and remain one plant in the app: both transports write to the same Losant device.
-- **The Things Stack (TTS)** on The Things Network sandbox is the LoRaWAN network server. It owns gateways, OTAA join, and the LoRaWAN session, and forwards each uplink to a webhook. It stores no plant data; it is a bridge from the radio world into Losant.
-
-A Wi-Fi node publishes to Losant directly over MQTT. A LoRaWAN node reaches a gateway, which reaches TTS, which calls the `lorawan-uplink` webhook, which writes to Losant. Different path in, same destination.
-
-## 14.2 Wi-Fi self-provisioning (provision-device, device_registry)
-
-The "mail a customer a board" requirement means one image with no per-board secrets. A board earns its identity at first boot.
-
-1. The board derives a **pairing code** from its chip hardware id (the high bits of the efuse MAC). This is deterministic, so the same physical board always produces the same code, even after a factory reset.
-2. On first boot in Wi-Fi mode, after connecting to the network, the board POSTs `{ code, token }` to `provision-device.js`, where `token` is the shared firmware provisioning token (the same value as the Netlify `PROVISION_TOKEN`).
-3. The function looks the code up in the **device_registry** table. If the code is new, it creates a Losant device with the full attribute schema, registers the code-to-device mapping, and returns a fresh device-scoped access key. If the code already exists (a re-provision after a reset), it returns the same device, so a board never spawns a duplicate.
-4. The board saves the device id, access key, and secret to NVS and connects to Losant over MQTT.
-
-As of v2.22 the function also re-applies the full attribute schema on every call (a PATCH), so a device created before a newer attribute existed gains it on the next provision. This is what fixed the LoRaWAN state rejection in §14.14.
-
-The shared token is the only secret in the image, and the repository copy carries a placeholder; the real value is filled in only in a private build and is also set as the Netlify `PROVISION_TOKEN` so the function can authenticate the board.
-
-## 14.3 The combined firmware (GP_Combined): boot path and OLED
-
-`firmware/GP_Combined/GP_Combined.ino`, version 4.2, is the production image. A `netmode` flag in the NVS namespace `gp` selects the boot path: `wifi` (default) or `lorawan`.
-
-- **Wi-Fi path**: try saved Wi-Fi; if none or it fails, open the phone setup hotspot; self-provision if there is no saved Losant identity; then stream telemetry to Losant over MQTT every few seconds. Telemetry stamps `transport: "wifi"`, `wifiRssi`, `batteryPct`, and `charging`.
-- **LoRaWAN path**: bring up the SX1262, load OTAA keys from NVS, join through any gateway, and uplink a 9-byte payload every interval.
-
-The OLED cycles through three pages (about 5 seconds each): the pairing code with online status, the live connection page (link type, Wi-Fi dBm or LoRa RSSI and SNR, and battery or power), and the live sensor readings. The branded setup portal markup is shared with the Wi-Fi-only firmware.
-
-Mode is set three ways and each writes NVS then reboots: the portal's Connection field, a Losant `setMode` command (Wi-Fi units), or a LoRaWAN downlink (LoRaWAN units). The image overflows the default app partition, so it is built with a larger-app or "Huge App" partition scheme.
-
-## 14.4 LoRaWAN on the node: SX1262, OTAA, payload, downlinks
-
-The SX1262 pins are the Heltec V3 schematic values: NSS 8, DIO1 14, RST 12, BUSY 13, SCK 9, MISO 11, MOSI 10. Bring-up uses RadioLib's default 1.6V TCXO and `setDio2AsRfSwitch(true)`; US915 uses `setDutyCycle(false)` (fair-use airtime, not a duty cycle) and sub-band 2 (FSB2).
-
-OTAA is a two-step sequence in RadioLib, and getting this wrong cost a debugging cycle (§14.14, issue 10): `beginOTAA(joinEUI, devEUI, nwkKey, appKey)` only sets the keys and returns success without joining; `activateOTAA()` performs the actual join and returns a new-session or restored-session result. The firmware restores the saved join nonces, calls `beginOTAA`, then loops on `activateOTAA` with a 10-second backoff until it joins, persisting nonces between attempts so DevNonce keeps incrementing.
-
-Uplinks use the 8-argument `sendReceive(payload, len, fport, downBuf, &downLen, false, nullptr, &evDown)` form so a downlink can be captured in the same call. The 9-byte payload:
-
-```
-[0..1] soilTemperatureF * 10, int16 big-endian  (0x8000 = sensor absent)
+[0..1] soilTemperatureF * 10, int16 big-endian   (0x8000 = sensor absent)
 [2..3] airTemperatureF  * 10, int16 big-endian
 [4]    airHumidity percent,    uint8
 [5..6] soilRaw 0..4095,        uint16 big-endian
 [7]    soilMoisturePercent,    uint8
-[8]    batteryPct 0..100,      uint8   (0xFF = unknown)
+[8]    batteryPct 0..100,      uint8             (0xFF = unknown)
 ```
 
-A one-byte 0x00 downlink means "switch back to Wi-Fi"; the firmware writes `netmode = wifi` and reboots. The uplink interval (`LORA_UPLINK_MS`) is 60 seconds for bench and demo responsiveness and is documented to raise toward 15 minutes for The Things Network fair-use in production (§14.14, issue 22).
+![LoRaWAN 9-byte payload layout](assets/LoRaWAN Payload Map.svg)
 
-## 14.5 The Things Stack topology and the four-call device API
+Nine bytes fits every data rate including DR0, so the frame transmits even at maximum range. Uplinks go out on fPort 2 using the 8-argument `sendReceive()` form, which captures any downlink in the same call along with its receive window; RSSI and SNR are read from the radio after each exchange and shown on the OLED and reported upstream.
 
-A critical, non-obvious fact about The Things Network: the **Identity Server** (which registers devices and gateways) is centralized on the **eu1** cluster, while a device's **Network, Join, and Application servers** run on the **operating cluster** (nam1 for North America). Creating a device through the API therefore touches two hosts and four endpoints:
+**Downlinks.** A one-byte `0x00` downlink means "switch back to Wi-Fi": the firmware writes the mode flag and reboots. It acts immediately and unconditionally, because the backend guarantees the queue is clean: `provision-lorawan` clears any stale queued downlink when it provisions, so any `0x00` that arrives is a real, deliberate switch. An earlier firmware-side guard (ignore a `0x00` in the first 20 seconds after a join) was removed in favor of that backend fix, because the guard had also been suppressing legitimate switches (chapter 20, issue L12).
 
-1. **Identity Server** (eu1): `POST /api/v3/applications/{app}/devices` creates the registration, with the network, application, and join server addresses set to the operating cluster.
-2. **Join Server** (nam1): `PUT /api/v3/js/applications/{app}/devices/{id}` sets the root key (AppKey). This is the only call that carries the key.
-3. **Network Server** (nam1): `PUT /api/v3/ns/...` sets the frequency plan, MAC and PHY versions, `supports_join`, and `resets_join_nonces`.
-4. **Application Server** (nam1): `PUT /api/v3/as/...` registers the device.
+**The uplink interval.** `LORA_UPLINK_MS` is 60 seconds in the current build, and this number is a deliberate, documented compromise. A class-A node can only receive a downlink in the brief windows after it uplinks, so the uplink interval bounds the latency of every app-to-node action, including switch-to-Wi-Fi. Sixty seconds makes the bench and demos responsive. The Things Network fair-use policy (30 seconds of airtime per device per day) calls for roughly 15-minute intervals in production, accepting the corresponding switch latency. The constant carries that instruction in a comment, and it is the one open production-hardening item (chapter 22).
 
-Each server only accepts the field-mask paths it owns; sending one a path that belongs to another is rejected as a forbidden path (§14.14, issue 12). The four-call split and the eu1-versus-nam1 host split are both encoded in `provision-lorawan.js`.
+### 8.10 The PRG button state machine
 
-## 14.6 provision-lorawan.js: idempotent provisioning
+One button, four behaviors, acting on release, with a live OLED hint while held so the owner always knows which action they are about to get:
 
-This function is the LoRaWAN twin of self-provisioning, called when the app switches a node to LoRaWAN. It is idempotent: **one TTS device per board**, which is the most important correctness property of the whole LoRaWAN system (§14.14, issues 14 and 8 of the report).
+![PRG button actions](assets/PRG Button Actions.svg)
 
-1. Validate the signed-in user. Read the board's Losant id from the request.
-2. Look the board up in **lorawan_devices** by its Losant id. If a row with a stored AppKey exists, reuse that TTS device: clear its downlink queue, set `resets_join_nonces`, and re-push the stored keys to the board through a Losant `provisionLoRa` command. Return.
-3. If there is no row, generate a DevEUI and AppKey, create the TTS device through the four-call API, store the route (TTS device id, DevEUI, AppKey, Losant id, user id), and push the keys.
+| Gesture | Action | Why it exists |
+|---------|--------|---------------|
+| Single tap | Wake the screen (or wake from deep sleep) | Burn-in dimming needs a wake gesture |
+| Double tap | Enter deep sleep, the soft power-off | The board has no power switch |
+| Hold 3 seconds | Graceful return to Wi-Fi mode, keeping saved Wi-Fi credentials | The escape hatch from a stuck LoRaWAN unit (section 13.6); non-destructive on purpose |
+| Hold 10 seconds | Full factory reset: wipe Wi-Fi, reset mode, reopen setup | Resale and re-setup |
 
-Storing the AppKey in `lorawan_devices` is what makes reuse possible: the same keys can be re-pushed without minting a new device. A non-2xx Supabase response is checked explicitly, because a swallowed route-store failure leaves the webhook unable to map the board (§14.14, issue 13).
+The 3-second hold originally performed the destructive Wi-Fi wipe, which made the only LoRaWAN escape hatch cost the customer their Wi-Fi setup. Splitting the tiers (v4.1) broke the recovery deadlock without sacrificing the reset (chapter 20, issue L10). The handler is polled (no interrupts), which is trivially safe alongside two radio stacks, and every blocking wait in the firmware loops over `handleButton()` so a hold is never missed.
 
-## 14.7 lorawan-uplink.js: the webhook decode-and-route
+A boot-time check still wipes Wi-Fi if PRG is held during power-on, with one refinement: waking from deep sleep skips the check, because the wake button and the reset button are the same physical button and a wake must never destroy credentials.
 
-The webhook TTS calls on every uplink. It is deliberately self-sufficient.
+### 8.11 Watchdog and main loops
 
-1. Verify the shared `X-Webhook-Token` header against `LORAWAN_WEBHOOK_TOKEN`.
-2. Take the uplink's `decoded_payload` if a TTS formatter set one; otherwise **decode the 9 raw bytes itself** from `frm_payload`. This removes any dependency on a per-device TTS payload formatter, which auto-provisioned devices do not have (§14.14, issue 13).
-3. Resolve the target Losant device from `lorawan_devices` by the uplink's TTS device id (with a static env-map and a default as fallbacks).
-4. Build the same state shape the Wi-Fi path sends, tag it with `transport: "lorawan"`, `loraRssi`, and `loraSnr`, omit any null field (Losant rejects a null for a typed Number attribute), and POST it to the Losant device.
+A 60-second task watchdog reboots the unit on any firmware hang; it is fed in every loop and wait, and detached only around WiFiManager's legitimately-blocking portal. The Wi-Fi loop is self-healing first (reconnect whichever layer dropped), then read, send, service MQTT, update the display, and a button-aware 3-second wait. The LoRaWAN loop is read, uplink (capturing any downlink), then a button-aware wait of the uplink interval. Both keep the page rotation and dimming alive during waits.
 
-As of v2.22 it logs the exact outcome of each delivery (resolved device and a 200/401/404/422/502 with the rejection detail), because a silently failing webhook gets auto-deactivated by TTS and looks like it is not firing at all.
+## 9. The diagnostic sketches
 
-## 14.8 lorawan-switch-wifi.js and register-gateway.js
+Two single-purpose sketches live in `firmware/diagnostics/` and are flashed temporarily over the main image for bench work:
 
-**lorawan-switch-wifi.js** brings a LoRaWAN node back to Wi-Fi. A LoRaWAN node is off Losant's MQTT, so a Losant command cannot reach it; the only path down is a LoRaWAN downlink, delivered during the node's next uplink window. The function looks up the board's TTS device by its Losant id and enqueues a one-byte 0x00 downlink on fPort 2 through the Application Server's `down/replace`. The node's firmware sees the 0x00 and reboots into Wi-Fi.
+- **ADC_Scanner** prints raw values for GPIO 1, 2, 3, 6, 7 side by side twice a second. Used with a jumper test (touch 3V3 to a pin, expect ~4095; touch GND, expect ~0) to prove an ADC pin works and to find which pin a wire actually lands on. This is the sketch that isolated the GPIO1 battery-sense conflict.
+- **OneWire_Scanner** searches pins 4, 6, 7 for 1-Wire devices and prints their 64-bit addresses. A real DS18B20 announces with family code 0x28; silence on all pins means the probe never reaches the bus (power, contact, or pull-up); a burst of random addresses is line noise being misparsed, which actually proves the pin and code are alive.
 
-**register-gateway.js** registers a customer's gateway on TTS under the GrowthPulse network so the customer never touches The Things Stack. The gateway registration is an Identity Server call (eu1), with the gateway server address pointing at the operating cluster. The gateway hardware must still be pre-configured before shipping to forward to the GrowthPulse TTS server on US915 FSB2; the app cannot reach inside the gateway to set that.
+Re-flashing the main firmware restores normal operation. Wi-Fi credentials and the Losant identity survive re-flashes in NVS unless explicitly reset; LoRaWAN nonces survive too, which matters for join behavior.
 
-## 14.9 Supabase tables: lorawan_devices (v2) and gateways
+---
 
-**lorawan_devices** (migration `docs/growthpulse-lorawan-routes-schema-v2.sql`) maps a TTS end-device to the Losant device its uplinks land on:
+# Part IV. Cloud Engineering
+
+## 10. The device cloud (Losant)
+
+### 10.1 Devices and attributes
+
+One Losant application contains one device per physical unit, created automatically by `provision-device`. The attribute schema mirrors telemetry exactly:
+
+| Attribute | Type | Source |
+|-----------|------|--------|
+| airTemperatureF, airHumidity | number | DHT22 |
+| soilTemperatureF | number | DS18B20 (carries the -196.6 sentinel when unplugged on Wi-Fi; nulled by the webhook on LoRaWAN) |
+| soilRaw | number | raw soil ADC, kept for calibration and diagnostics |
+| soilMoisturePercent | number | derived percentage |
+| batteryPct, charging | number, boolean | the battery system |
+| wifiRssi | number | Wi-Fi link signal |
+| loraRssi, loraSnr | number | LoRaWAN link signal, written by the uplink webhook |
+| transport | string | "wifi" or "lorawan", stamped authoritatively by whichever path reports |
+
+A Losant rule that shaped the system: **a state report that includes an attribute the device does not define is rejected in its entirety.** A device created before `loraRssi`, `loraSnr`, and `transport` existed therefore silently dropped every LoRaWAN report while accepting Wi-Fi ones, which was the deepest bug of the LoRaWAN bring-up (chapter 20, issue L8). The provisioning function now re-applies the full attribute schema on every call, not just at creation, so existing devices self-heal on their next check-in.
+
+### 10.2 Credentials model: keys versus tokens
+
+Two different credential systems, never interchangeable:
+
+- **Access keys** (key + secret pairs) authenticate **devices** over MQTT. Each board's key is minted by `provision-device`, scoped by allowlist to that one device, and lives only in the board's NVS.
+- **API tokens** authenticate **applications** over REST, and three exist on purpose: a read-only token for the hot `device-state`/`device-history` polling path (least privilege where call volume is highest), a write-capable token for commands and webhook state injection, and a provisioning token with device-create and key-create rights used only by `provision-device`.
+
+### 10.3 The wire protocol
+
+Telemetry publishes to `losant/{deviceId}/state`; commands arrive on `losant/{deviceId}/command` and surface through the client's `onCommand` callback. Command delivery requires the device to be connected at that moment; there is no offline queue. The backend reads state through REST (`GET .../devices/{deviceId}/compositeState`), which returns per-attribute `{ value, time }` pairs, and the webhook writes LoRaWAN state through REST (`POST .../devices/{deviceId}/state`).
+
+### 10.4 Alert workflows
+
+Email and SMS alerts are Losant visual workflows: a Device State trigger, a conditional holding the rule (for example `{{ data.soilMoisturePercent }} < 25`), and an email or SMS node on the true branch. Two operational facts learned the hard way: the conditional's true output must wire forward into the notification node (wiring the email node backwards into the conditional silently does nothing), and Losant email sends are rate-limited to one per minute, so two qualifying readings seconds apart produce one email, which looks like a failure and is not. These cloud workflows fire even when nobody has the app open; the in-app alarm system (chapter 16) is a separate, complementary layer.
+
+### 10.5 The simulator
+
+`growthpulse-simulator/simulator.mjs` connects with the same MQTT credential model and publishes realistic randomized telemetry. It built the entire cloud pipeline before hardware existed and remains the demo tool when the physical unit is elsewhere. Operational rule: never run it against the same device id as live hardware; the interleaved sources produce nonsense.
+
+## 11. Accounts, ownership, and routing (Supabase)
+
+Supabase provides authentication and four small tables. None store sensor data; they store identity, ownership, and routing.
+
+### 11.1 Authentication
+
+Email/password auth via `@supabase/supabase-js`. Signup attaches profile metadata (first and last name, grower type) that flows into the UI; sessions persist in browser storage and are observed with `onAuthStateChange`, so a refresh never logs anyone out. Password reset is a branded email link flow. The subscription tier also lives in user metadata, which is what made plans finally persist across logins (chapter 20, issue A3).
+
+### 11.2 device_registry: the factory database
+
+```sql
+create table device_registry (
+  claim_code        text primary key,
+  losant_device_id  text not null,
+  created_at        timestamptz default now()
+);
+```
+
+Every provisioned unit has one row mapping the code on its screen to its cloud identity. RLS is the access model: authenticated users may SELECT (that is what claiming is), and nobody can write through the public anon key because no insert or update policy exists. Writes happen only through the service role, inside `provision-device`. Because the pairing code is chip-derived and permanent, the registry is also what makes provisioning idempotent: a factory-reset board posts the same code and gets its same device back.
+
+### 11.3 devices: cloud-authoritative ownership
+
+The registry says which codes are valid; the `devices` table says who owns what. One row per claimed unit, owned by `user_id`, with per-user RLS on all four verbs, carrying everything that should follow the account: name, location, geocoded `geo`, group, transport, plant, the full irrigation config, and the optional photo.
+
+Design points that matter:
+
+- **`claim_code` is UNIQUE**, so a second account claiming the same code hits a 23505 violation, surfaced as "already claimed by another account." Claim exclusivity in one constraint.
+- The browser talks to this table directly with the anon key; RLS means it can only ever see or change its own rows. There is no trusted server in the path; the database is the guard. It is also what `device-command` authorizes against: the function forwards the caller's JWT to this table, and zero returned rows means 403.
+- `grp` is the column name because `group` is a SQL reserved word; the store maps it.
+- `created_at` is read into the app as `claimedAt`, which drives the report's "Everything" range and the activity timeline.
+- Removing a device deletes the row, which releases the claim for re-claiming (resale).
+
+### 11.4 gateways and lorawan_devices
+
+`gateways` stores each account's LoRaWAN gateways (name, EUI) with per-user RLS, so gateways follow the account like devices do.
+
+`lorawan_devices` (the v2 schema) is the LoRaWAN routing table, and its shape encodes the most important architectural correction of the project:
 
 ```
 tts_device_id     text primary key
 dev_eui           text not null
-app_key           text                       -- OTAA root key, re-pushed on reuse
-losant_device_id  text not null              -- UNIQUE: one TTS device per board
-user_id           uuid references auth.users
-created_at        timestamptz default now()
+app_key           text                -- OTAA root key, re-pushed on reuse
+losant_device_id  text not null      -- UNIQUE: one TTS device per board
+user_id           uuid
 ```
 
-The unique index on `losant_device_id` enforces one TTS device per board. The v2 migration adds the `app_key` column and the unique index and clears v1 orphan rows.
+The UNIQUE index on `losant_device_id` enforces **one TTS device per board**, and the stored `app_key` is what allows provisioning to re-push the same keys instead of minting new ones (chapter 20, issue L6). RLS is enabled with no client policies: the browser can never read or write LoRaWAN routes or keys; only the serverless functions, using the service role, touch this table.
 
-**gateways** (migration `docs/growthpulse-gateways-schema.sql`) stores LoRaWAN gateways on the account so they persist across logins.
+## 12. The backend (Netlify functions)
 
-Both tables have Row Level Security on with no client policies; only the serverless functions, using the service role, read or write them.
+Netlify hosts the static app and nine serverless functions, bundled with esbuild per `netlify.toml`. The functions exist for one structural reason: no Losant, TTS, or Supabase service token may ever reach a browser. Three groups:
 
-## 14.10 Transport switching, both directions, and the deadlock
+### 12.1 The read and write paths
 
-**Wi-Fi to LoRaWAN** works because the board is reachable on Losant while on Wi-Fi: the backend pushes keys through a Losant command, the board saves them and reboots into LoRaWAN, and joins.
+**device-state.js** is the hot path the app polls. It reads the Losant composite state with the read-only token, converts anything missing or mistyped to null (the app's universal "no data" signal), and returns the reading with `Cache-Control: no-store`, because a stale reading is worse than an extra request. The timestamp rides on the moisture attribute's report time so the app can show data age honestly. It forwards every attribute in the schema, including transport and both signal pairs, which is what lets the app display the true link.
 
-**LoRaWAN to Wi-Fi** is the hard direction. The board is off Losant, so the switch is a queued LoRaWAN downlink that lands on the next uplink. The app gates the switch on the **saved** transport, not the live card, so a momentarily wrong card cannot make the button inert (§14.14, issue 15).
+**device-command.js** is the guarded write path, with four defenses: POST only; a command-name allowlist; the dedicated write token; and an ownership check, in which the function forwards the caller's Supabase JWT to the `devices` table and lets RLS decide (no auth header is 401, zero rows is 403). Only then does it call the Losant command API.
 
-The deadlock to be aware of: provisioning or switching to LoRaWAN requires the board to be on Wi-Fi (to receive the Losant command). A board stuck on LoRaWAN cannot be reached that way. The escape hatch is the PRG button's 3-second graceful return to Wi-Fi (§14.12), which keeps saved credentials.
+**device-history.js** backs the report graphs. The app holds only a 60-reading in-memory ring, so anything longer comes from Losant's time-series store. It auto-scales resolution so a report never carries more than about 240 points regardless of span, cleans the same disconnected-sensor sentinels handled everywhere else (so a dead probe leaves an honest gap rather than dragging averages), trims empty lead and tail buckets, and keeps interior gaps so offline stretches stay visible.
 
-## 14.11 Battery, charging, and the VBUS mod
+**render-pdf.js** renders a finished report's HTML to a true vector PDF with headless Chrome (a Lambda-sized Chromium plus puppeteer-core, shipped outside the esbuild bundle via `netlify.toml`). It is auth-gated, requiring a valid Supabase session, so it cannot be abused as an open HTML-to-PDF service. It is the preferred download path; the client falls back to in-browser rendering whenever it fails, so the download always succeeds.
 
-The Heltec V3 battery sense is read through a divider gated by GPIO37. On this board the control polarity is inverted from the documented reference, so the firmware drives it to the opposite level and averages 16 ADC samples. There is no charge-status pin, so charging is inferred from the voltage trend and the top-of-charge voltage. The reported percent is smoothed to creep at most 1% per reading, so a charger's instantaneous voltage inflation does not show as a jump.
+### 12.2 The provisioning pair
 
-With no battery installed on USB, the charge chip pins the sense line near a full pack's voltage and the board has no battery-detect pin, so this cannot be fully resolved in software; the firmware reports AC when the line is pinned at the top and no longer rising. The honest hardware fix is an optional 100k/100k divider from the board's 5V pin to ground with the midpoint on GPIO7 (`USE_VBUS_SENSE` set to 1): about 2.5V on USB, 0V on battery. Default off.
+**provision-device.js** is Wi-Fi self-provisioning, the function that makes one-image manufacturing work:
 
-## 14.12 The PRG button state machine and command grace
+1. Authenticate the board by the shared firmware token.
+2. Normalize the pairing code and look it up in `device_registry` with the service role.
+3. Unknown code: create a Losant device named `GrowthPulse <CODE>` with the **full** attribute schema, and register the code-to-device mapping. Known code: reuse the existing device, so a re-provision after a factory reset or NVS wipe never creates a duplicate.
+4. **Re-apply the full attribute schema on every call** (a PATCH, best-effort). This is the self-heal that fixed the silently-dropped LoRaWAN state (chapter 20, issue L8): a device created before newer attributes existed gains them on its next provision.
+5. Mint a fresh access key allowlisted to exactly this one device, and return the triplet.
 
-The PRG button (GPIO0) is tiered, acting on release:
+The shared token's blast radius is deliberately small (it can only create a device and a single-device key), and per-batch tokens, rate limiting, and certificate pinning are the documented production hardening steps.
 
-- **Single tap**: wake the OLED or wake from sleep.
-- **Double tap** (two short presses): enter deep sleep (microamp draw, screen off), the soft power-off. A single press or RESET wakes it.
-- **Hold 3 seconds**: graceful return to Wi-Fi, keeping saved Wi-Fi credentials, for recovering a stuck LoRaWAN unit.
-- **Hold 10 seconds**: full factory reset (wipe Wi-Fi, reopen setup). The OLED shows which action is pending while the button is held.
+**provision-lorawan.js** is the LoRaWAN twin, called when the app switches a node to LoRaWAN, and its defining property is **idempotency: one TTS device per board.**
 
-A separate guard protects against stale cloud commands: the firmware ignores `provisionLoRa`, `factoryReset`, and `setMode` for the first 12 seconds after connecting to Losant, because a command delivered the instant a device connects is a stale replay, not a user action (§14.14, issue 17).
+1. Validate the signed-in user, then look the board up in `lorawan_devices` by its Losant id.
+2. **Route exists (with a stored AppKey): reuse it.** Clear the TTS downlink queue (so no stale switch-to-Wi-Fi `0x00` can bounce the node the moment it joins), set `resets_join_nonces` on the **Join Server** (so a reflashed board joins on the first try), and re-push the same stored keys to the board through a Losant `provisionLoRa` command. No new device, no orphan, a stable downlink target.
+3. **No route: mint an identity.** Generate a random DevEUI and AppKey (JoinEUI zeros), create the TTS device through the four-call API (section 13.3), store the route with the AppKey, and push the keys to the board.
 
-## 14.13 Environment variables (LoRaWAN additions)
+Two failure-handling details are load-bearing: a non-2xx Supabase response on the route insert is checked explicitly and surfaced (a silently-lost route leaves the webhook unable to map the board, chapter 20 issue L5), and the AppKey is never echoed back to the browser.
 
-In addition to the variables in §7.3, the LoRaWAN path uses:
+### 12.3 The LoRaWAN bridge functions
 
-| Variable | Used by | Purpose |
-|----------|---------|---------|
-| `TTS_API_KEY` | provision-lorawan, lorawan-switch-wifi, register-gateway | TTS API key with device and gateway write rights |
-| `TTS_APP_ID` | provision-lorawan, lorawan-switch-wifi | the TTS application id (growthpulse) |
-| `TTS_CLUSTER` | same | operating cluster host, default nam1.cloud.thethings.network |
-| `TTS_IS_HOST` | provision-lorawan, register-gateway | Identity Server host, default eu1.cloud.thethings.network |
-| `TTS_USER_ID` | register-gateway | the TTS account that owns registered gateways |
-| `TTS_FREQ_PLAN` | provision-lorawan, register-gateway | default US_902_928_FSB_2 |
-| `LORAWAN_WEBHOOK_TOKEN` | lorawan-uplink | shared secret the TTS webhook sends as X-Webhook-Token |
-| `PROVISION_TOKEN` | provision-device | shared firmware token authenticating a board's self-provision |
-| `LOSANT_PROVISION_API_TOKEN` | provision-device | Losant token with device-create rights |
+**lorawan-uplink.js** is the webhook TTS calls on every uplink, and it is deliberately self-sufficient:
 
-## 14.14 Failure modes and how to read them
+1. Verify the shared `X-Webhook-Token` header.
+2. Take the TTS-decoded payload if a formatter set one, otherwise **decode the 9 raw bytes itself** from `frm_payload`. This removes any dependency on per-device TTS payload formatters, which auto-provisioned devices do not have.
+3. Resolve the target Losant device from `lorawan_devices` by the uplink's TTS device id (with a static env-map and a default as fallbacks for the bench era).
+4. Build the same state shape the Wi-Fi path sends, tagged `transport: "lorawan"` with `loraRssi` and `loraSnr` from the gateway metadata, **omitting every null field**, because Losant rejects a null for a typed Number attribute and one null would void the whole report.
+5. POST it to Losant, and log the exact outcome (resolved device, 200/401/404/422/502 with the rejection detail). The logging exists because TTS runs a circuit breaker: a webhook that fails repeatedly is auto-deactivated, after which the Netlify log goes quiet and the failure looks like "the webhook is not firing" when it is actually firing and failing (chapter 20, issue L8).
 
-The full chronological journal is in the LoRaWAN System and Debugging Report. The highest-value reference points:
+**lorawan-switch-wifi.js** brings a LoRaWAN node back to Wi-Fi. A LoRaWAN node is off Losant's MQTT, so a Losant command cannot reach it; the only path down is a class-A downlink delivered in the receive window after the node's next uplink. The function validates the session, finds the board's TTS device through the route table, and enqueues a one-byte `0x00` on fPort 2 via the Application Server's `down/replace` (replace, not push, so duplicate switch requests never stack). Delivery latency is bounded by the uplink interval, which is physics, not a bug.
 
-- **Join fails with -1116 (no join accept)**: either a sub-band mismatch (gateway on FSB1, TTS on FSB2) or DevNonce catch-up after a reflash (set `resets_join_nonces`).
-- **First uplink fails with -1101 (session not active)**: `activateOTAA` was never called; `beginOTAA` only sets keys.
-- **Downlink rejected with `no_device_session`**: it is aimed at a TTS device the node never joined, an orphan from non-idempotent provisioning.
-- **App card stuck on Wi-Fi and the TTS webhook auto-deactivated**: Losant is rejecting the LoRaWAN state because the device lacks the `loraRssi`/`loraSnr` attributes; provision-device's schema sync fixes it on the next check-in.
-- **Node bounces between Wi-Fi and LoRaWAN**: a stale `provisionLoRa` or `factoryReset` command on reconnect (the 12-second grace) or a stale 0x00 downlink in the queue (the backend queue-clear).
-- **A TTS webhook showing "Healthy" with empty function logs** has likely been auto-deactivated for repeated failures; read its status banner.
+**register-gateway.js** registers a customer's gateway on TTS under the GrowthPulse network. It validates the session, normalizes the 16-hex EUI, and creates the gateway entity through the Identity Server with the operating cluster as its traffic server, treating "already registered" (409) as success so re-scans are idempotent. The boundary it cannot cross: the app can register the gateway entity, but the gateway hardware itself must already be configured to forward to the GrowthPulse network server (that is baked in before shipping; the app cannot reach inside a customer's gateway).
+
+### 12.4 Environment variables
+
+The complete set, with visibility:
+
+| Variable | Visible to | Purpose |
+|----------|-----------|---------|
+| VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY | browser bundle | Supabase project; RLS enforces all access |
+| SUPABASE_SERVICE_ROLE_KEY | functions only | registry, routing, and ownership reads/writes that bypass RLS |
+| LOSANT_APP_ID | functions only | Losant application id |
+| LOSANT_API_TOKEN | functions only | read-only token (state and history) |
+| LOSANT_COMMAND_TOKEN | functions only | write-capable token (commands, webhook state) |
+| LOSANT_PROVISION_API_TOKEN | functions only | device-create and key-create rights |
+| PROVISION_TOKEN | functions only | shared firmware token; must equal the value in the private firmware build |
+| TTS_API_KEY | functions only | TTS key with end-device and gateway write rights |
+| TTS_APP_ID | functions only | TTS application id (growthpulse) |
+| TTS_CLUSTER | functions only | operating cluster, nam1.cloud.thethings.network |
+| TTS_IS_HOST | functions only | Identity Server host, eu1.cloud.thethings.network |
+| TTS_USER_ID | functions only | TTS account that owns registered gateways |
+| TTS_FREQ_PLAN | functions only | US_902_928_FSB_2 |
+| LORAWAN_WEBHOOK_TOKEN | functions only | shared secret TTS sends as X-Webhook-Token |
+
+Operational fact that bit us more than once: **Netlify environment variables only take effect on a redeploy.** Set the variable, then trigger a deploy.
+
+## 13. LoRaWAN engineering (The Things Stack)
+
+### 13.1 Why LoRaWAN, and what it changes
+
+Wi-Fi covers the home; LoRaWAN covers fields, far gardens, and greenhouses beyond Wi-Fi range: kilometers of reach and months of battery, at the price of a fundamentally different traffic model. LoRaWAN is not a streaming link. The Things Network fair-use policy allows about 30 seconds of uplink airtime per device per day (roughly one 9-byte frame every 15 minutes at the slowest data rate) and 10 downlinks per day, and a class-A node only listens in two short windows after each uplink. Every product decision around LoRaWAN, the binary payload, the queued switch command, the 15-minute staleness window in the app, follows from those constraints.
+
+### 13.2 Topology: eu1 versus nam1
+
+A critical, non-obvious fact about The Things Network: the **Identity Server**, which registers devices and gateways, is centralized on the **eu1** cluster, while a device's **Network, Join, and Application Servers** run on the operating cluster (**nam1** for North America). API calls therefore split across two hosts, and aiming a registration at nam1 fails with a misleading `route_not_found` (chapter 20, issue L3). Both hosts are configurable (`TTS_IS_HOST`, `TTS_CLUSTER`).
+
+### 13.3 The four-call device API
+
+Creating an end device through the API touches four endpoints, in order:
+
+1. **Identity Server** (eu1): POST the registration, with the network, application, and join server addresses pointed at the operating cluster.
+2. **Join Server** (nam1): PUT the root key (the AppKey lives here and only here) and `resets_join_nonces`, which is a Join Server field; the Network Server rejects it as a forbidden path (chapter 20, issue L14).
+3. **Network Server** (nam1): PUT the MAC and PHY configuration: frequency plan US_902_928_FSB_2, LoRaWAN MAC 1.0.4, regional parameters RP002 1.0.4, `supports_join`.
+4. **Application Server** (nam1): PUT the registration with an empty field mask.
+
+Each server accepts only the field-mask paths it owns; sending one server a path that belongs to another is rejected as "forbidden path(s) in field mask" (chapter 20, issue L4). The split, the hosts, and the exact field masks are all encoded in `provision-lorawan.js`, which is the executable documentation of this API.
+
+### 13.4 Gateways
+
+The development gateway is an Elecrow ThinkNode G1 (US915). It runs the Semtech UDP packet forwarder pointed at the operating cluster on port 1700. The single most important gateway fact: **the channel sub-band must be FSB2** (uplink channels 8 to 15), because that is what The Things Network uses in the US. The G1 shipped on FSB1, which meant the gateway literally could not hear the node: joins failed with -1116 while the gateway showed healthy and connected (chapter 20, issue L1). Customer gateways must ship pre-configured for FSB2 and the GrowthPulse network server; the app's gateway registration handles the network side, and the customer never opens a console.
+
+### 13.5 The webhook contract
+
+One custom webhook per TTS application: JSON format, base URL `https://growthpulsecloud.com/.netlify/functions/lorawan-uplink`, the uplink-message event enabled, and an `X-Webhook-Token` header whose value equals the Netlify `LORAWAN_WEBHOOK_TOKEN`. The webhook's health banner in the TTS console is part of the system's diagnostics: TTS deactivates a webhook after repeated delivery failures, and a deactivated webhook with empty function logs is the signature of a downstream rejection, not a missing integration.
+
+### 13.6 Transport switching, both directions
+
+![Transport switching, both directions](assets/Transport Switching.svg)
+
+**Wi-Fi to LoRaWAN** is the easy direction, because the board is reachable: the app calls `provision-lorawan`, the backend ensures the one TTS identity exists, clears the downlink queue, and pushes the keys through a Losant command; the board saves them and reboots into LoRaWAN.
+
+**LoRaWAN to Wi-Fi** is the hard direction, and three lessons shaped it:
+
+- Delivery is a queued downlink that lands on the node's next uplink, so the switch takes up to one uplink interval. The app's edit sheet says so instead of pretending it is instant.
+- The app gates the switch button on the **saved** transport, not the live card, because gating on the live reading once produced a deadlock: the card was stuck displaying Wi-Fi (issue L8), so the app refused to send the switch that would have fixed it (chapter 20, issue L7).
+- A node stuck on LoRaWAN with no working downlink path would otherwise be unreachable, since provisioning requires Wi-Fi. The non-destructive 3-second PRG hold is the engineered escape hatch: it returns the node to Wi-Fi with credentials intact, from which every other operation is possible. The golden rule that falls out: **a switch to LoRaWAN must start from a node that is on Wi-Fi and online**, because that is the only time the cloud can hand it keys.
 
 ---
 
-# 15. Appendix
+# Part V. The Web Application
 
-## 15.1 Links
+## 14. Application architecture
+
+Stack: React 18 plus Vite, recharts for charts, lucide-react for icons, no router (a five-tab state machine), one hand-written CSS design system, Supabase JS for auth and data. Version 2.22.2.
+
+### 14.1 Entry and the auth gate
+
+`index.html` carries the PWA surface: viewport-fit for iPhone safe areas, theme color, manifest, icons, and the Apple metas that make Add to Home Screen produce a real full-screen app. `App.jsx` contains `Gate`, the top-level decision: an "accounts service not connected" notice when env vars are missing, a loading state until the session is restored, the password-recovery screen when Supabase fires PASSWORD_RECOVERY, `Landing` and `Login` for signed-out visitors, or the app shell for a signed-in user.
+
+The shell is mounted as `<AppProvider key={user.id}>`, and that `key` is load-bearing: changing user identity remounts the entire store, so no state can leak between accounts, or between demo and a real account.
+
+**Demo mode** is a parallel fake session: the auth provider serves a synthetic demo user, so demo is just another user id to the rest of the app. That one mechanism gives complete data separation between demo and real data, with no flags sprinkled through the code. Demo runs on the Pro tier so prospects see everything.
+
+### 14.2 The store
+
+`store/AppContext.jsx` is one context providing everything; there is no Redux because one provider with useCallback actions is sufficient at this scale.
+
+**Persistence and isolation.** localStorage keys follow `growthpulse:<userId>:<name>`. Combined with the provider remount, every account and the demo have fully isolated devices, settings, alarms, journals, gateways, and tier cache.
+
+**Cloud-authoritative devices.** Real accounts load devices from the `devices` table (a `devicesReady` flag gates the UI while loading); every edit syncs back through `syncDevice`. Demo devices are the only ones persisted locally. A one-time migration lifts pre-ownership localStorage claims into the table.
+
+**The device model.** Each device carries identity (id, name, location, geo, group, photo), configuration (transport, plant, irrigation including rain delay), claim linkage (`losantDeviceId`, `claimedAt`), and live state (reading, a rolling 60-entry history, `hasData`, `online`, `lastSeen`). Claimed devices initialize with a null reading and render "waiting for the first reading"; only real cloud data flips them live. This rule exists because an early build seeded claimed devices with simulated data, and fake-looking numbers on a real product destroy trust.
+
+**The live loop.** One interval at the user's refresh rate (default 2 seconds) fetches `device-state` for every claimed device in parallel; errors keep the previous reading. Freshness flips `online` false after 45 seconds of silence on Wi-Fi, 15 minutes on LoRaWAN (which reports on a minutes-scale cadence by design). A 15-second "connecting" grace window after load keeps a newly claimed device from flashing "Offline" before its first reading.
+
+**Weather, pinned to the plant.** The selected device's stored geo drives an Open-Meteo forecast call. If the device has no geo, the store sets a `needsLocation` flag and stops: it never reads browser GPS and never invents a default city. The forecast describes where the plant lives, not where the owner is standing, which is the answer to the vacation problem, and location is requested only at the point of use by the one feature that needs it (rain delay).
+
+### 14.3 Actions
+
+The store exposes one action per intent: claiming (`claimDevice`: registry validation, optional geocode, insert with the 23505 duplicate-claim handling), editing (`updateDevice` with re-geocoding, `setDevicePlant`, `setIrrigation`, photo), lifecycle (`removeDevice` purges journals and device-scoped alarms and deletes the cloud row, releasing the claim; `factoryResetDevice` attaches the caller's session, POSTs the owner-verified command, then removes), LoRaWAN (`provisionLoRaWAN`, the Wi-Fi switch via `lorawan-switch-wifi`, gateway add with auto-registration), journals, alarms (including the one-tap plant-derived starter set), settings, and tier.
+
+## 15. Domain logic
+
+`store/helpers.js` is the domain brain:
+
+- `METRICS` defines per-metric metadata: label, unit, icon, color, slider bounds, default good and warn bands. `rainChance` exists as a pseudo-metric so rain can participate in the alarm system without being a device sensor.
+- `PLANTS` (in `plants.js`) is the catalog: ten categories (houseplants, tropical, succulents, herbs, vegetables, fruits, flowers, orchids, trees and shrubs, lawn), each with its own good and warn ranges for moisture, humidity, and temperature, and more than 140 species mapped into the categories with names, scientific names, and emoji. `rangesForDevice` layers the plant's ranges over the defaults, which is how "ideal" becomes species-relative everywhere at once.
+- `statusOf` (inside good = good, inside warn = warn, else critical) colors the entire product through one function.
+- `metricConnected` is the disconnected-sensor detector, built from measured failure signatures: soil temperature below -100, null values, humidity at or below zero (impossible from a working DHT22), soil raw under 300.
+- `healthScore` averages good=100, warn=66, critical=28 over **connected** metrics only, so a missing probe neither drags nor props the score, and one critical metric visibly hurts (one critical among three healthy reads 82, not 95).
+- `recommendations` orders the advice: missing-sensor fix-its first (naming the exact pin and component), then battery warnings (warn at 20 percent, critical at 10, suppressed while charging or on AC), then plant-care advice from the bands, then the all-good line only if nothing else fired.
+- `activeAlerts` evaluates enabled rules per device (rain rules once against the shared forecast) and feeds the banner, badge, and toasts. Toasts are raised by key-diffing (`deviceId:ruleId`), so three simultaneous trips raise three named toasts rather than one anonymous notification.
+- Unit handling converts at the display layer only; storage stays Fahrenheit so switching units never mutates data.
+
+`store/tiers.js` defines the tiers as feature flags consumed across the app: Free ($0: 3 devices, full plant catalog, live monitoring, alarms, history), Plus ($4.99/mo: 10 devices, weather and rain intelligence), Pro ($9.99/mo: effectively unlimited devices, automated irrigation with rain delay, LoRaWAN gateways). Real accounts default to Free with polished locked-state upgrade cards; the demo runs Pro.
+
+## 16. Views and components
+
+### 16.1 The five tabs
+
+- **Live** is the dashboard: plant bar (tap to open the plant picker), three hero metrics, the moisture gauge with the health score, transport and signal and power badges, the weather card, the irrigation card with the rain-pause prompt, four sensor chips with trend arrows and tap-through detail charts, insights, and the growth journal. A claimed device that has not reported yet replaces the dashboard with a "waiting" state; an offline device shows "last reading X ago."
+- **History** renders per-metric charts for hour, day, week, and month windows with the plant's ideal band shaded and max, average, and minimum per window.
+- **Alarms** shows the live alert banner, the rule cards (metric, above or below, threshold slider, device scope, enable toggle), and the auto-set button that generates a plant-tuned starter set.
+- **Devices** lists every plant with photo or emoji, pairing code, transport and signal, power, status, and moisture; groups become section headings. The edit sheet holds rename, location, group, photo with square crop, the transport switch with its honest latency note, and the danger zone (remove, factory reset) behind explicit confirmations. The gateways section lists account gateways and adds new ones by typed EUI or camera QR scan.
+- **Settings** holds the plan card, units, theme (light, dark, auto), the LoRaWAN-aware refresh-rate pills with battery guidance, notification channels, and the account card with the report download and sign-out.
+
+### 16.2 Honesty as UI policy
+
+The honesty rules concentrate in the components: disconnected metrics render gray dashes with "not connected" and are not tappable; claimed-but-silent devices show waiting states, never numbers; the connection badge derives from the telemetry transport tag, never from the user's picker; battery percent and charging come from the device, and a unit with no battery shows AC. Each of those rules traces to a specific incident in the debugging journal where the UI briefly showed something that was not true.
+
+### 16.3 The QR scanner, a camera lifecycle lesson
+
+The gateway QR scanner (`QrScanner.jsx`) reads the gateway label and extracts the 16-hex EUI from the bundled label payload (`utils/eui.js` handles the URL-encoded multi-line format, colons and hyphens, and pretty-printing). Its bug is worth recording (chapter 20, issue A6): the scanner's effect depended on its `onResult` callback, and the Devices view passed a fresh inline function on every render, while the live polling loop re-renders that view every few seconds. The camera was therefore torn down and restarted continuously, which presented as "sometimes doesn't open, and when it opens it doesn't scan." The fix runs the effect once on mount and reads the latest callback through a ref, with `autoPlay` and a metadata-load play retry for iOS Safari, where `play()` can be rejected outside the original tap gesture.
+
+## 17. The report system
+
+The report pipeline produces a branded, graph-rich PDF of any account's plants over any period, and it is the most layered subsystem in the app:
+
+1. **ExportSheet** collects the options: period presets, custom dates, or "Everything" (back to each plant's `claimedAt`), which plants, which sensors. While building, it swaps to a spinner with phase labels and locks itself closed so an in-flight render cannot be orphaned or double-fired.
+2. **History** comes from `device-history` per plant in parallel (mock series for demo plants), auto-bucketed server-side to about 240 points.
+3. **buildReport** (`utils/accountExport.js`) assembles one branded HTML document: letterhead, account and period block, per-plant inline-SVG line charts (ideal-band shading, min/avg/max, segmented at nulls so offline gaps and dead probes show as honest gaps), a chronological activity timeline (claimed, first data, journal entries), and summary tables. All report CSS is scoped under `.gp-doc`/`.gpr-*` because the client-side renderer mounts the report inside the live app page, and unscoped class names once collided with the app's own (the centered-logo bug).
+4. **Delivery, three paths sharing that one document:** Download PDF tries the server renderer first (`render-pdf`, true vector text) and falls back automatically to client-side html2pdf rasterization (dynamically imported, render scale clamped for mobile Safari's canvas limits) on any failure or in demo mode, so the download always succeeds. Print report opens the standalone HTML and auto-prints, which is also the sharpest save-as-PDF path. The older single-plant snapshot (`utils/report.js`) remains for quick shares.
+
+## 18. The design system and PWA
+
+`index.css` is the entire design language: a token set (background #eef0f2, card white, ink #2c3e50, brand green #2ecc71, status colors, 22px card radius, layered soft shadows, a 480px phone column), components (cards, badges, pills, chips, sheets with grab handles and slide-up animation, toasts, skeletons, the warnbox), and a dark theme as a token override on `data-theme`, with auto following the OS. At 860px the layout converts to a desktop grid: the bottom tab bar becomes a 240px sidebar. Two specific fixes are part of the record: form controls inherit the app font (browsers default them to system fonts with different metrics, which users perceive as "the typing looks shifted"), and badges are nowrap after a mid-word wrapping bug. Safe-area insets pad the app bar, tab bar, and sheets so the installed PWA clears the iPhone notch and home indicator. The manifest and icons (rendered onto a white matte, because iOS renders transparency as black) complete Add to Home Screen.
+
+---
+
+# Part VI. Integration, the Record, and the Road Ahead
+
+## 19. End-to-end sequences
+
+**First boot and Wi-Fi setup.** Power on; OLED "Starting up"; boot-time PRG check; self-test screen; watchdog armed; mode read from NVS (wifi). `connectWiFi()` finds no credentials and opens the branded hotspot; the customer joins it, the portal serves the config page (or 192.168.4.1), credentials save, association succeeds. `ensureProvisioned()` finds no identity, POSTs the pairing code, and stores the returned triplet. MQTT connects, the grace window opens, telemetry begins on the 3-second cadence, the pair-code page shows ON.
+
+**Claim.** App: Connect a device, transport choice, name, optional location, code. Store: registry SELECT (RLS-permitted read), reject unknown codes; insert the `devices` row (UNIQUE claim_code enforces one owner; 23505 becomes "already claimed"); geocode if a place was given; select the new device. UI shows the waiting state until the first poll returns data.
+
+**Live tick.** Interval fires; claimed devices fetch `device-state` in parallel; nulls and sentinels flow through untouched; history appends; trends, health, and insights recompute; `metricConnected` decides which slots render data versus "not connected."
+
+**Alarm trip.** A reading crosses a rule. In-app: `activeAlerts` includes it, the badge and banner update, the key-diff raises a toast. Out-of-app: the Losant workflow's conditional passes and the email or SMS node fires, subject to the one-per-minute email rate limit. Two independent layers, by design.
+
+**Switch to LoRaWAN.** Edit sheet, transport to LoRaWAN, save. The app POSTs `provision-lorawan` with the session; the backend reuses or mints the one TTS identity, clears the downlink queue, sets `resets_join_nonces`, pushes keys via `provisionLoRa`; the board (on Wi-Fi, past the grace window) stores keys and reboots; the SX1262 comes up, OTAA joins through any FSB2 gateway in range; uplinks flow gateway to TTS to webhook to Losant; the card flips to LoRaWAN with live RSSI and SNR within a poll.
+
+**Switch back to Wi-Fi.** Edit sheet, transport to Wi-Fi, save. The app POSTs `lorawan-switch-wifi`; the backend queues the one-byte `0x00` via `down/replace`; the node's next uplink carries the downlink back; the firmware writes the mode and reboots; saved Wi-Fi reconnects; the next state report stamps `transport: "wifi"` and the card follows. Latency is bounded by the uplink interval.
+
+**Factory reset.** Edit sheet, danger zone, confirmation with the data-loss disclaimer and the offline PRG fallback note. `factoryResetDevice` attaches the session, the function checks ownership through RLS and sends the allowlisted command, the unit wipes Wi-Fi on screen and reopens setup; the app removes the device, deletes the cloud row (releasing the claim), and purges journals and device-scoped alarms.
+
+**Report export.** Settings, Download report, options, generate. Histories fetch in parallel; the document builds; the server renders a vector PDF or the client falls back; the file saves. The spinner with phase labels covers the wait.
+
+## 20. The debugging journal
+
+Every significant problem encountered during development, with symptom, root cause, and fix. This chapter is the part of the manual most worth reading slowly: the system's architecture is, to a large degree, the residue of these fixes.
+
+### Hardware and sensors
+
+**Issue H1. Soil temperature read -196.6 F.**
+Root cause: the missing 4.7k pull-up on the DS18B20's 1-Wire data line (or an absent probe). -196.6 F is the Dallas library's -127 C disconnected sentinel. Fix: the resistor, plus end-to-end honesty so the app names the resistor when it sees the signature.
+
+**Issue H2. Soil moisture frozen at 100 percent, raw ~120, ignored water.**
+Root cause: the capacitive probe was powered at 3.3V, and its NE555 oscillator does not run below about 4V; the power LED lit anyway. Fix: power the probe from 5V (output stays under ~3V, ADC-safe).
+
+**Issue H3. Soil ADC read a flat 0 on GPIO1.**
+Root cause: GPIO1 is wired to the V3's battery-sense divider. Fix: move the probe to GPIO2; the ADC scanner sketch plus a 3V3/GND jumper test is how it was isolated. The freed conflict later became the battery feature.
+
+**Issue H4. Battery always read 0 percent; the unit claimed AC on battery.**
+Root cause: the V3's battery-sense control pin (GPIO37) is inverted from the documented reference, so the divider was disabled exactly when the firmware meant to enable it. Fix (v3.7): correct polarity, 16-sample averaging.
+
+**Issue H5. No charging indicator exists in hardware.**
+Root cause: the V3 exposes no charge-status pin. Fix (v3.7): infer charging from the smoothed voltage trend and top-of-charge level.
+
+**Issue H6. Battery percent leaped from 44 to 65 the instant a charger connected.**
+Root cause: a charger inflates the pack's terminal voltage immediately; the naive curve read it as charge. Fix (v3.8): the displayed percent creeps at most 1 percent per reading.
+
+**Issue H7. No way to turn the unit off without unplugging.**
+Fix (v3.9): double-tap PRG enters deep sleep; single press or RST wakes. Waking was also exempted from the boot-time Wi-Fi wipe, because the wake button is the reset button.
+
+**Issue H8. With USB power and no battery, a phantom climbing percent.**
+Root cause: the charge chip pins the sense line near a full pack's voltage and there is no battery-detect pin; software cannot fully distinguish the cases. Fix (v3.10): report AC when the line is pinned at the top and not rising. The complete fix is the optional VBUS divider mod (v3.11).
+
+### Wi-Fi provisioning
+
+**Issue W1. Phones hung for a minute joining the setup hotspot.**
+Root cause: with AP and STA both active, background STA retry scans and modem power-save pulled the radio off the AP channel. Fix: `setWiFiAutoReconnect(false)` and `WiFi.setSleep(false)`; joins now complete in seconds.
+
+**Issue W2. The portal vanished mid-setup.**
+Root cause: WiFiManager's 180-second default portal timeout restarted the AP under a slow phone. Fix: 600 seconds.
+
+**Issue W3. The captive portal never popped on some phones.**
+Root cause: OS-level portal detection suppression (often with cellular data on). Fix: the portal answers at 192.168.4.1 directly, documented everywhere; turning off cellular data helps.
+
+**Issue W4. Uploads died mid-write ("the chip stopped responding").**
+Root cause: 921600 baud over marginal cables. Fix: upload at 115200; if needed, force download mode (hold PRG, tap RST).
+
+### Web app honesty and accounts
+
+**Issue A1. A junk pairing code created a ghost device.**
+Root cause: no claim validation. Fix: registry lookup; unknown codes are rejected with a human message.
+
+**Issue A2. Claimed devices showed fake-looking values before ever reporting.**
+Root cause: devices were seeded with simulated data. Fix: claimed devices start empty and honest, with a waiting state.
+
+**Issue A3. The subscription plan reset to Free on every login.**
+Root cause: the tier was stored only in the browser. Fix (v2.16): persist it in Supabase user metadata.
+
+**Issue A4. LoRaWAN was faked in the UI.**
+Root cause: interim code forced every node to display Wi-Fi and carried "in development" notes. Fix (v2.17): the app derives the true link and real signal from telemetry.
+
+**Issue A5. The onboarding screen rendered squeezed inside the desktop sidebar column.**
+Root cause: it was mounted inside the shell grid and auto-placed into the 240px column. Fix: the full-page centered wrapper.
+
+### LoRaWAN radio and The Things Stack
+
+**Issue L1. Joins failed with -1116 while the gateway looked healthy.**
+Root cause: sub-band mismatch. The ThinkNode G1 shipped on US915 FSB1; The Things Network uses FSB2. The gateway could not hear the node at all. Fix: set the gateway's channel plan to FSB2 and make it permanent.
+
+**Issue L2. The combined firmware "joined" but the first uplink failed with -1101.**
+Root cause: `beginOTAA` only sets keys; `activateOTAA` performs the join, and the combined image never called it. Fix (v4.1): the activate retry loop and the 8-argument `sendReceive`, matching the proven standalone sketch.
+
+**Issue L3. Device creation failed with 404 route_not_found on nam1.**
+Root cause: the Identity Server is centralized on eu1; nam1 has no registration route. Fix: registration to eu1, JS/NS/AS calls to nam1.
+
+**Issue L4. "Forbidden path(s) in field mask" while configuring the device.**
+Root cause: each TTS server accepts only the field-mask paths it owns. Fix: trim the Network Server mask to MAC/PHY paths; give the Application Server an empty mask.
+
+**Issue L5. After switching to LoRaWAN, the app card stayed on Wi-Fi.**
+Layered causes fixed in sequence: auto-provisioned devices had no TTS payload formatter, so the webhook bailed with 422 (fix, v2.20: the webhook decodes the 9 bytes itself); the route store could fail silently on a non-2xx Supabase response (fix, v2.21: check and surface it); and the true root cause was issue L8.
+
+**Issue L6. Switching back to Wi-Fi failed with no_device_session.**
+Root cause: orphan TTS devices. Provisioning minted a new DevEUI on every switch, so a board accumulated a dozen dead identities and the downlink targeted one the node had never joined. Fix (v2.21): idempotent provisioning, one stable TTS device per board, keys stored and re-pushed, orphans cleared by the v2 migration. The most important architectural correction in the system.
+
+**Issue L7. The switch-to-Wi-Fi button never fired.**
+Root cause: the app gated the switch on the live card state, which was stuck on Wi-Fi (L5), a chicken-and-egg deadlock. Fix: gate on the saved transport so the action always fires.
+
+**Issue L8. The card never left Wi-Fi, and TTS auto-deactivated the webhook.**
+The true root of L5, found by reading the webhook's deactivation banner: Losant rejects an entire state report containing an attribute the device does not define. The board's device predated the `loraRssi`/`loraSnr`/`transport` attributes, so every LoRaWAN report was rejected with 502 while Wi-Fi reports passed; the repeated 502s tripped the TTS webhook circuit breaker, silencing the function logs. Fix (v2.22): `provision-device` syncs the full attribute schema on every provision, and the webhook logs every delivery outcome.
+
+**Issue L9. The node bounced endlessly between Wi-Fi and LoRaWAN, sometimes wiping its own Wi-Fi.**
+Root cause: stale `provisionLoRa`/`factoryReset` commands redelivered the instant the board reconnected. Fix (v4.1): the 12-second command grace window.
+
+**Issue L10. A node stuck on LoRaWAN could not be recovered without losing Wi-Fi.**
+Root cause: provisioning requires Wi-Fi, and the only manual escape (the PRG hold) was destructive. Fix (v4.1): the tiered button; 3 seconds is now a graceful, credential-preserving return to Wi-Fi.
+
+**Issue L11. A factory-reset board seemed to change identity, orphaning its route.**
+Investigation showed the pairing code is chip-derived and stable, so the board reclaims the same Losant device; the apparent change was the orphan problem (L6) wearing a costume. Recorded takeaway: do not factory-reset during testing; each reset triggers a provision cycle that, before idempotency, churned routing.
+
+**Issue L12. A stale 0x00 downlink bounced the node to Wi-Fi right after every join.**
+Root cause: a leftover switch downlink from earlier testing sat in the TTS queue and was delivered on the first uplink after each join. Fix (v4.2): provisioning clears the downlink queue; the firmware's overlapping 20-second guard was removed because it also suppressed legitimate switches.
+
+**Issue L13. Joins took about eight retries and two minutes after each reflash.**
+Root cause: DevNonce. A reflash wipes NVS and restarts the counter; TTS silently drops joins until the counter passes its remembered high-water mark. Fix: set `resets_join_nonces` (see L14) and drop the join retry from 30 to 10 seconds.
+
+**Issue L14. resets_join_nonces was never actually taking effect.**
+Root cause: the backend was PUTting it to the **Network Server**, which rejects it as a forbidden field-mask path; it is a **Join Server** field, since join nonces are the Join Server's business. The error had been swallowed in the best-effort reuse path, and a new-device provision would have failed at that step outright. Fix (v2.22.2): the field moved to the `js/` endpoint in both create and reuse paths, with the device EUIs the Join Server requires. Verified directly: the Join Server PUT returns the device with `"resets_join_nonces": true`, and the board now joins on the first try after a reflash. The diagnostic path is worth remembering: the Network Server's "forbidden_paths" error names the rejected field, which is the API telling you which server owns it.
+
+**Issue L15. Switch-to-Wi-Fi took up to 15 minutes.**
+Root cause: class-A physics, not a bug. A downlink rides the node's next uplink, and the interval was the production 15 minutes. Fix (v4.2): 60-second interval for bench and demo, with the documented instruction to raise it back toward 15 minutes for production fair-use.
+
+### Web app, late fixes
+
+**Issue A6. The gateway QR camera sometimes did not open, and when it did, it did not scan.**
+Root cause: the scanner effect depended on its `onResult` callback, recreated on every render of a view that re-renders every few seconds from the polling loop; the camera was torn down and restarted constantly. Fix (v2.22.1): run the effect once on mount, read the callback through a ref, add `autoPlay` plus a metadata-load play retry for iOS Safari.
+
+### Operational notes that bit us
+
+- **Netlify environment variables only apply on redeploy.** Always trigger a deploy after changing one.
+- **A stale `.git/index.lock`** recurred on the development machine and blocked commits; `rm -f .git/index.lock` clears it.
+- **The TTS webhook health banner is a circuit breaker.** A webhook deactivated for repeated failures produces empty function logs, which reads as "not firing" when it is firing and failing. Check the banner first.
+- **Losant email alerts are rate-limited to one per minute.** Space test readings accordingly.
+- **GitHub occasionally rejects a push with a transient server-side `commit_refs` error.** The commit is safe locally; retry the push.
+
+## 21. Decision log
+
+The reasoning behind every significant decision, grouped by layer. Each is a sentence because the full context lives in the chapters above.
+
+**Identity and provisioning.** The pairing code derives from the chip MAC: unique per unit at zero provisioning cost, readable off the screen, permanent, and stable across resets, which makes provisioning idempotent. The registry validates every claim so typos cannot create ghost devices, and it is the future factory database. Self-provisioning at first boot replaced flash-time credentials so one identical image serves every board with no per-board secrets. The claim code is typed by the customer because during setup the phone is on the device's hotspot with no internet, so silent binding is impossible; the zero-typing token handoff is specced for later.
+
+**Hardware.** The soil probe lives on GPIO2 because GPIO1 is the battery-sense net (measured flat 0). The probe is powered at 5V because its NE555 will not oscillate below about 4V, and its output stays ADC-safe. Sensor failure sentinels pass through the pipeline untouched because hiding them would mask hardware faults; the app converts them to fix-it advice instead.
+
+**Firmware.** One file per image, reviewable top to bottom and trivially flashable. Mode changes write NVS and reboot rather than hot-swapping stacks, because only the chosen stack is ever initialized and RAM is the ceiling. The PRG button is tiered with a live on-screen hint, and its 3-second tier is deliberately non-destructive because it is the LoRaWAN escape hatch. Destructive cloud commands are ignored for 12 seconds after connect because broker redelivery is indistinguishable from a user action except by timing. The 60-second LoRaWAN uplink interval is a documented bench setting; 15 minutes is the production value, and the difference is the latency bound on every queued downlink.
+
+**Cloud.** Both transports write to one Losant device so a node stays one plant across switches. TTS is a bridge, never a second source of truth. Provisioning is idempotent (one TTS device per board) because every downlink target and route becomes ambiguous otherwise. The webhook decodes payload bytes itself so nothing depends on per-device console configuration. The attribute schema re-syncs on every provision because Losant rejects whole reports over one undefined attribute. `resets_join_nonces` is set on the Join Server because that is the server that owns it, and it is what makes reflashed boards join instantly. All tokens live server-side; the `VITE_` prefix is the public/private line; RLS is the authorization engine; commands are allowlisted and owner-verified.
+
+**Web app.** Claimed devices start empty, the connection badge derives from telemetry, disconnected sensors say so, and weather never reads GPS or invents a city: honesty is a feature, and each rule traces to an incident. Location is requested only at the point of use by the one feature that needs it. The store remounts on user change and namespaces storage per user, which gives account and demo isolation through one mechanism. Demo is a fake user id rather than a flag. The health score excludes disconnected sensors and weights 100/66/28 so a single critical metric visibly hurts. Reports ship as a branded document with real cloud history, vector-rendered server-side with a raster fallback so the download always succeeds. The transport switch is gated on saved state, not live state, because the live card can be wrong exactly when the switch matters most.
+
+## 22. Known limitations and roadmap
+
+1. **Raise the LoRaWAN uplink interval for production.** The one open hardening item from the bring-up: 60 seconds is a bench setting; The Things Network fair-use calls for about 15 minutes, with the corresponding switch-back latency. The constant is documented in the firmware.
+2. **Zero-typing auto-bind.** The portal carries a one-time account token the unit presents on first connect, removing the typed claim code. The typed code is the shipping-grade interim.
+3. **Web push notifications** for alarm trips, complementing the cloud email and SMS layer.
+4. **Billing.** Tiers are fully functional feature gates; Stripe replaces the demo "buy" path.
+5. **Family sharing.** Multiple accounts per garden, unblocked by cloud-authoritative ownership.
+6. **Rain-delay actuation.** The flag, gating, and UX exist; wiring it to suppress real pump commands lands with the irrigation backend.
+7. **Provisioning hardening.** Per-batch firmware tokens or device certificates, rate limiting on the provisioning endpoint, and TLS certificate pinning in the firmware.
+8. **Group-level report selection**, a convenience once accounts run many nodes per zone.
+
+Completed and absorbed into the chapters above: per-unit cloud provisioning, server-side ownership, LoRaWAN bring-up with automated provisioning and bidirectional switching, battery telemetry, and durable history.
+
+## 23. Appendix
+
+### 23.1 Links
 
 | Resource | URL |
 |----------|-----|
@@ -1099,52 +850,35 @@ The full chronological journal is in the LoRaWAN System and Debugging Report. Th
 | Netlify | https://www.netlify.com |
 | Supabase | https://supabase.com |
 | Losant | https://www.losant.com |
-| Open-Meteo (forecast + geocoding) | https://open-meteo.com |
-| Heltec V3 docs | https://wiki.heltec.org |
+| The Things Stack console (nam1) | https://nam1.cloud.thethings.network/console |
+| Open-Meteo | https://open-meteo.com |
+| Heltec V3 documentation | https://wiki.heltec.org |
+| RadioLib | https://github.com/jgromes/RadioLib |
 | ESP32 Arduino boards index | https://espressif.github.io/arduino-esp32/package_esp32_index.json |
 | CP210x USB driver | https://www.silabs.com/developer-tools/usb-to-uart-bridge-vcp-drivers |
 | Arduino IDE | https://www.arduino.cc/en/software |
 
-## 15.2 Project file inventory
+### 23.2 Project file inventory
 
 | Path | Contents |
 |------|----------|
-| `growthpulse-app/` | The web app and serverless functions (this repo deploys the product) |
-| **Firmware** | |
-| `firmware/GP_Combined/GP_Combined.ino` | Production image: one image, Wi-Fi or LoRaWAN by NVS flag (v4.2) |
+| `firmware/GP_Combined/GP_Combined.ino` | Production image, v4.3: one image, Wi-Fi or LoRaWAN by NVS flag |
 | `firmware/GP_Node/GP_Node.ino` | Wi-Fi-only self-provisioning image (reference) |
 | `firmware/GP_LoRaWAN/GP_LoRaWAN.ino` | Standalone LoRaWAN sketch (the proven OTAA reference) |
 | `firmware/GP_Provisioning/GP_Provisioning.ino` | Original captive-portal firmware (reference) |
-| **Serverless functions** | |
-| `netlify/functions/provision-device.js` | Wi-Fi self-provision: create/reuse Losant device, sync attributes |
-| `netlify/functions/provision-lorawan.js` | Idempotent LoRaWAN provisioning (one TTS device per board) |
-| `netlify/functions/lorawan-uplink.js` | TTS uplink webhook: decode bytes, route to Losant |
-| `netlify/functions/lorawan-switch-wifi.js` | Enqueue the 0x00 downlink to return a node to Wi-Fi |
-| `netlify/functions/register-gateway.js` | Auto-register a customer gateway on TTS |
-| `netlify/functions/device-state.js` | Read path the app polls (transport + signal aware) |
-| `netlify/functions/device-command.js` | Owner-verified cloud command (factory reset, etc.) |
-| `netlify/functions/device-history.js` | Time-series history for report graphs |
-| `netlify/functions/render-pdf.js` | Headless-Chrome vector PDF renderer |
-| **Supabase schemas** | |
+| `firmware/diagnostics/` | ADC scanner and 1-Wire scanner bench sketches |
+| `netlify/functions/` | The nine serverless functions (chapter 12) |
+| `src/` | The React application (chapters 14 to 18) |
 | `docs/growthpulse-supabase-schema.sql` | Pairing-code registry |
-| `docs/growthpulse-devices-schema.sql` | Ownership `devices` table + RLS |
-| `docs/growthpulse-lorawan-routes-schema-v2.sql` | `lorawan_devices` route table (current) |
+| `docs/growthpulse-devices-schema.sql` | Ownership table plus RLS (photo migration in `growthpulse-devices-photo.sql`) |
+| `docs/growthpulse-lorawan-routes-schema-v2.sql` | LoRaWAN route table (current) |
 | `docs/growthpulse-gateways-schema.sql` | Account-saved gateways |
-| **Documentation** | |
-| `docs/GrowthPulse User Manual.(md/pdf)` | Customer-facing manual |
-| `docs/GrowthPulse Engineering Manual.(md/pdf)` | This document |
-| `docs/GrowthPulse LoRaWAN System and Debugging Report.md` | Dual-transport architecture + full bug journal |
-| `docs/GrowthPulse LoRaWAN Bring-Up Guide.(md/pdf)` | One-time by-hand gateway + TTS setup |
-| `docs/GrowthPulse LoRaWAN Auto-Provision Setup.md` | Env vars + flow for automated provisioning |
-| `docs/GrowthPulse Gateway Auto-Register Setup.md` | Env vars + flow for gateway auto-registration |
-| `docs/GrowthPulse LoRaWAN Cleanup and Reset.md` | Operational reset runbook |
-| `docs/GrowthPulse Self-Provisioning Setup.(md/pdf)` | Wi-Fi self-provision setup |
-| `docs/GrowthPulse Wiring Guide.md`, `docs/GrowthPulse Wiring Diagram.pdf` | Bench wiring references |
-| `docs/GrowthPulse Product Roadmap.md`, `docs/GrowthPulse Deployment Model.md` | Product strategy docs |
-| `src/utils/accountExport.js` | Full report builder + three delivery paths |
-| `README.md` (repo) | Developer onboarding |
+| `docs/` manuals | This manual, the Technical Reference Manual, the Operations Manual, and the User Manual, each as markdown plus PDF |
+| `growthpulse-simulator/simulator.mjs` | Telemetry simulator |
+| `CHANGELOG.md` | Complete version history, app and firmware |
+| `README.md` | Developer onboarding |
 
-## 15.3 Identifier reference (non-secret)
+### 23.3 Identifier reference (non-secret)
 
 | Identifier | Value |
 |------------|-------|
@@ -1153,9 +887,11 @@ The full chronological journal is in the LoRaWAN System and Debugging Report. Th
 | Demo Losant device id | 6a1fb486df527c8bf8d3324b |
 | Serial baud | 115200 |
 | Portal fallback address | 192.168.4.1 |
+| TTS application id | growthpulse |
+| Development gateway | ThinkNode G1, EUI E4:38:19:FF:FE:2A:58:80 |
 
-Access keys, access secrets, API tokens, and the Supabase anon key are intentionally absent from this document. They live in the firmware file, the gitignored `.env`, and Netlify's environment store.
+Access keys, API tokens, the provisioning token, and the Supabase keys are intentionally absent from this document. They live in the private firmware build, the gitignored `.env`, and Netlify's environment store.
 
 ---
 
-GrowthPulse Engineering, internal and confidential. Keep credentials out of documents and repositories.
+GrowthPulse Engineering. Internal and confidential. Keep credentials out of documents and repositories.

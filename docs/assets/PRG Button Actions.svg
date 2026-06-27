@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 320" font-family="Helvetica, Arial, sans-serif">
+  <rect width="920" height="320" fill="#ffffff"/>
+  <text x="460" y="32" font-size="18" font-weight="bold" fill="#2c3e50" text-anchor="middle">The PRG Button  (actions fire on release; the screen shows the pending action while held)</text>
+
+  <!-- timeline -->
+  <line x1="80" y1="120" x2="860" y2="120" stroke="#2c3e50" stroke-width="3"/>
+  <g font-size="11" fill="#7f8c8d" text-anchor="middle">
+    <line x1="80" y1="112" x2="80" y2="128" stroke="#2c3e50" stroke-width="2"/><text x="80" y="145">0 s</text>
+    <line x1="275" y1="112" x2="275" y2="128" stroke="#2c3e50" stroke-width="2"/><text x="275" y="145">0.7 s</text>
+    <line x1="530" y1="112" x2="530" y2="128" stroke="#2c3e50" stroke-width="2"/><text x="530" y="145">3 s</text>
+    <line x1="800" y1="112" x2="800" y2="128" stroke="#2c3e50" stroke-width="2"/><text x="800" y="145">10 s</text>
+  </g>
+
+  <!-- zones -->
+  <rect x="80" y="92" width="195" height="20" fill="#dff5e9"/>
+  <rect x="275" y="92" width="255" height="20" fill="#eef0f2"/>
+  <rect x="530" y="92" width="270" height="20" fill="#fff7e8"/>
+  <rect x="800" y="92" width="60" height="20" fill="#fdeaea"/>
+
+  <!-- cards -->
+  <g>
+    <rect x="60" y="180" width="190" height="110" rx="10" fill="#ffffff" stroke="#2ecc71" stroke-width="2"/>
+    <text x="155" y="204" font-size="12" font-weight="bold" fill="#1a9b5a" text-anchor="middle">Tap  (under 0.7 s)</text>
+    <text x="155" y="226" font-size="10.5" fill="#2c3e50" text-anchor="middle">Wake the screen,</text>
+    <text x="155" y="241" font-size="10.5" fill="#2c3e50" text-anchor="middle">or wake from sleep</text>
+    <text x="155" y="268" font-size="11" font-weight="bold" fill="#2c3e50" text-anchor="middle">Double tap: deep sleep</text>
+    <text x="155" y="283" font-size="9.5" fill="#7f8c8d" text-anchor="middle">soft power-off, microamp draw</text>
+    <line x1="155" y1="178" x2="155" y2="124" stroke="#2ecc71" stroke-width="1.6" stroke-dasharray="4,3"/>
+  </g>
+  <g>
+    <rect x="440" y="180" width="200" height="110" rx="10" fill="#ffffff" stroke="#f4a52b" stroke-width="2"/>
+    <text x="540" y="204" font-size="12" font-weight="bold" fill="#b97a10" text-anchor="middle">Hold 3 s: back to Wi-Fi</text>
+    <text x="540" y="226" font-size="10.5" fill="#2c3e50" text-anchor="middle">Returns a LoRaWAN unit to</text>
+    <text x="540" y="241" font-size="10.5" fill="#2c3e50" text-anchor="middle">Wi-Fi mode, KEEPING the</text>
+    <text x="540" y="256" font-size="10.5" fill="#2c3e50" text-anchor="middle">saved Wi-Fi credentials</text>
+    <text x="540" y="280" font-size="9.5" fill="#7f8c8d" text-anchor="middle">the recovery escape hatch, non-destructive</text>
+    <line x1="540" y1="178" x2="540" y2="124" stroke="#f4a52b" stroke-width="1.6" stroke-dasharray="4,3"/>
+  </g>
+  <g>
+    <rect x="680" y="180" width="200" height="110" rx="10" fill="#ffffff" stroke="#ef4444" stroke-width="2"/>
+    <text x="780" y="204" font-size="12" font-weight="bold" fill="#ef4444" text-anchor="middle">Hold 10 s: factory reset</text>
+    <text x="780" y="226" font-size="10.5" fill="#2c3e50" text-anchor="middle">Wipes saved Wi-Fi, resets to</text>
+    <text x="780" y="241" font-size="10.5" fill="#2c3e50" text-anchor="middle">Wi-Fi mode, reopens the</text>
+    <text x="780" y="256" font-size="10.5" fill="#2c3e50" text-anchor="middle">setup hotspot</text>
+    <text x="780" y="280" font-size="9.5" fill="#7f8c8d" text-anchor="middle">for resale and re-setup</text>
+    <line x1="780" y1="178" x2="780" y2="124" stroke="#ef4444" stroke-width="1.6" stroke-dasharray="4,3"/>
+  </g>
+
+  <text x="80" y="74" font-size="10" fill="#7f8c8d">Also: held at power-on wipes Wi-Fi and opens setup (skipped when waking from deep sleep, so waking never destroys credentials).</text>
+</svg>

@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 560" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="ta" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L8,4.5 L0,9 z" fill="#1a9b5a"/></marker>
+    <marker id="tb" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L8,4.5 L0,9 z" fill="#13a4ff"/></marker>
+  </defs>
+  <rect width="920" height="560" fill="#ffffff"/>
+  <text x="460" y="30" font-size="18" font-weight="bold" fill="#2c3e50" text-anchor="middle">Transport Switching, Both Directions</text>
+
+  <!-- Wi-Fi to LoRaWAN -->
+  <rect x="40" y="55" width="840" height="220" rx="12" fill="#f7fbf9" stroke="#1a9b5a" stroke-width="2"/>
+  <text x="60" y="82" font-size="13" font-weight="bold" fill="#1a9b5a">Wi-Fi to LoRaWAN  (fast: the board is reachable over Losant while on Wi-Fi)</text>
+  <g font-size="10.5" fill="#2c3e50">
+    <rect x="60" y="100" width="130" height="56" rx="8" fill="#ffffff" stroke="#1a9b5a"/><text x="125" y="124" text-anchor="middle" font-weight="bold">1. App</text><text x="125" y="140" text-anchor="middle">save Connection =</text><text x="125" y="152" text-anchor="middle">LoRaWAN</text>
+    <line x1="190" y1="128" x2="218" y2="128" stroke="#1a9b5a" stroke-width="2.5" marker-end="url(#ta)"/>
+    <rect x="220" y="100" width="170" height="56" rx="8" fill="#ffffff" stroke="#1a9b5a"/><text x="305" y="118" text-anchor="middle" font-weight="bold">2. provision-lorawan</text><text x="305" y="134" text-anchor="middle">reuse or mint the ONE</text><text x="305" y="148" text-anchor="middle">TTS device per board</text>
+    <line x1="390" y1="128" x2="418" y2="128" stroke="#1a9b5a" stroke-width="2.5" marker-end="url(#ta)"/>
+    <rect x="420" y="100" width="170" height="56" rx="8" fill="#ffffff" stroke="#1a9b5a"/><text x="505" y="118" text-anchor="middle" font-weight="bold">3. The Things Stack</text><text x="505" y="134" text-anchor="middle">clear downlink queue,</text><text x="505" y="148" text-anchor="middle">set resets_join_nonces (JS)</text>
+    <line x1="590" y1="128" x2="618" y2="128" stroke="#1a9b5a" stroke-width="2.5" marker-end="url(#ta)"/>
+    <rect x="620" y="100" width="170" height="56" rx="8" fill="#ffffff" stroke="#1a9b5a"/><text x="705" y="118" text-anchor="middle" font-weight="bold">4. Losant command</text><text x="705" y="134" text-anchor="middle">provisionLoRa pushes</text><text x="705" y="148" text-anchor="middle">JoinEUI / DevEUI / AppKey</text>
+    <line x1="705" y1="156" x2="705" y2="184" stroke="#1a9b5a" stroke-width="2.5" marker-end="url(#ta)"/>
+    <rect x="540" y="186" width="330" height="62" rx="8" fill="#dff5e9" stroke="#1a9b5a"/><text x="705" y="208" text-anchor="middle" font-weight="bold">5. Board saves keys to flash, reboots into LoRaWAN,</text><text x="705" y="224" text-anchor="middle">joins via OTAA through any FSB2 gateway in range,</text><text x="705" y="240" text-anchor="middle">uplinks flow to the same Losant device</text>
+    <rect x="60" y="186" width="440" height="62" rx="8" fill="#fff7e8" stroke="#f4a52b"/>
+    <text x="280" y="208" text-anchor="middle" font-weight="bold">Precondition (the golden rule)</text>
+    <text x="280" y="224" text-anchor="middle">The node must be ON Wi-Fi and online when you switch:</text>
+    <text x="280" y="240" text-anchor="middle">that is the only moment the cloud can hand it keys.</text>
+  </g>
+
+  <!-- LoRaWAN to Wi-Fi -->
+  <rect x="40" y="295" width="840" height="220" rx="12" fill="#f6fafd" stroke="#13a4ff" stroke-width="2"/>
+  <text x="60" y="322" font-size="13" font-weight="bold" fill="#0d7ec4">LoRaWAN to Wi-Fi  (queued: a class-A node only listens right after it uplinks)</text>
+  <g font-size="10.5" fill="#2c3e50">
+    <rect x="60" y="340" width="130" height="56" rx="8" fill="#ffffff" stroke="#13a4ff"/><text x="125" y="364" text-anchor="middle" font-weight="bold">1. App</text><text x="125" y="380" text-anchor="middle">save Connection =</text><text x="125" y="392" text-anchor="middle">Wi-Fi</text>
+    <line x1="190" y1="368" x2="218" y2="368" stroke="#13a4ff" stroke-width="2.5" marker-end="url(#tb)"/>
+    <rect x="220" y="340" width="170" height="56" rx="8" fill="#ffffff" stroke="#13a4ff"/><text x="305" y="358" text-anchor="middle" font-weight="bold">2. lorawan-switch-wifi</text><text x="305" y="374" text-anchor="middle">look up the TTS device</text><text x="305" y="388" text-anchor="middle">from the route table</text>
+    <line x1="390" y1="368" x2="418" y2="368" stroke="#13a4ff" stroke-width="2.5" marker-end="url(#tb)"/>
+    <rect x="420" y="340" width="170" height="56" rx="8" fill="#ffffff" stroke="#13a4ff"/><text x="505" y="358" text-anchor="middle" font-weight="bold">3. Downlink queued</text><text x="505" y="374" text-anchor="middle">one byte 0x00, fPort 2,</text><text x="505" y="388" text-anchor="middle">down/replace (no stacking)</text>
+    <line x1="590" y1="368" x2="618" y2="368" stroke="#13a4ff" stroke-width="2.5" marker-end="url(#tb)"/>
+    <rect x="620" y="340" width="170" height="56" rx="8" fill="#ffffff" stroke="#13a4ff"/><text x="705" y="358" text-anchor="middle" font-weight="bold">4. Next uplink</text><text x="705" y="374" text-anchor="middle">downlink delivered in the</text><text x="705" y="388" text-anchor="middle">class-A receive window</text>
+    <line x1="705" y1="396" x2="705" y2="424" stroke="#13a4ff" stroke-width="2.5" marker-end="url(#tb)"/>
+    <rect x="540" y="426" width="330" height="62" rx="8" fill="#e6f4fd" stroke="#13a4ff"/><text x="705" y="448" text-anchor="middle" font-weight="bold">5. Board writes mode = wifi, reboots, reconnects to the</text><text x="705" y="464" text-anchor="middle">saved Wi-Fi, and the next state report stamps</text><text x="705" y="480" text-anchor="middle">transport = "wifi"; the app card follows</text>
+    <rect x="60" y="426" width="440" height="62" rx="8" fill="#fff7e8" stroke="#f4a52b"/>
+    <text x="280" y="448" text-anchor="middle" font-weight="bold">Latency is bounded by the uplink interval</text>
+    <text x="280" y="464" text-anchor="middle">About a minute on the 60 s bench build; up to 15 minutes at the</text>
+    <text x="280" y="480" text-anchor="middle">production interval. Manual fallback: hold PRG 3 s on the node.</text>
+  </g>
+
+  <text x="460" y="540" font-size="10" fill="#7f8c8d" text-anchor="middle">The plant stays the same plant in the app throughout: both transports write to the same Losant device.</text>
+</svg>

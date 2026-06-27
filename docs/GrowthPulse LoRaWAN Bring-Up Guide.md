@@ -1,5 +1,7 @@
 # GrowthPulse LoRaWAN Bring-Up Guide
 
+> **Status: engineering reference. The manual setup this guide describes is now automated by the app.** Bringing a node up on LoRaWAN no longer means creating the TTS device, generating keys, pasting a payload formatter, or wiring a webhook by hand. The `provision-lorawan` function does all of that, the `lorawan-uplink` webhook decodes the raw bytes itself (no formatter), and `register-gateway` registers a gateway when you add it in the app. For the current step-by-step, see **GrowthPulse LoRaWAN Auto-Provision Setup**, **GrowthPulse Gateway Auto-Register Setup**, and the **Teammate / Web App Checklists**. This document is kept as the reference for how the LoRaWAN path works under the hood and for bench debugging.
+
 How to take a GrowthPulse node from Wi-Fi to **LoRaWAN** end to end: node firmware, The Things Stack, gateway, and the uplink into the existing app. Researched against official sources (RadioLib, The Things Stack, The Things Network, Heltec, Semtech) in June 2026. Every nontrivial fact has a source at the bottom.
 
 **Hardware in hand:** Heltec WiFi LoRa 32 V3 (ESP32-S3 + Semtech SX1262), US915. ThinkNode G1 gateway (G1-US915), Gateway EUI `E4:38:19:FF:FE:2A:58:80`.
@@ -8,7 +10,9 @@ How to take a GrowthPulse node from Wi-Fi to **LoRaWAN** end to end: node firmwa
 
 ---
 
-## 0. Recommended order of operations (do it in this order)
+## 0. Recommended order of operations (manual bench bring-up)
+
+> In normal use you do none of this by hand; the app automates it (see the status note at the top). The sequence below is the manual path, useful for understanding the chain or debugging a node on the bench.
 
 Bring-up fails when people try to do everything at once. Do this sequence:
 
@@ -17,7 +21,7 @@ Bring-up fails when people try to do everything at once. Do this sequence:
 3. **Flash the standalone LoRaWAN node sketch** (`firmware/GP_LoRaWAN/`) and get it to **join** and send an uplink you can see in the console. Section 2 + 6.
 4. **Add the payload formatter** so the bytes decode into real fields. Section 5.
 5. **Add the webhook** so uplinks land in the app pipeline. Section 5 + 7.
-6. **Only then** merge the LoRaWAN path into the main firmware as a boot-selectable mode. Section 8.
+6. Merge the LoRaWAN path into the main firmware as a boot-selectable mode. This is now done; it ships as `GP_Combined`. Section 8.
 
 Prove the radio join in isolation first. Merging into the combined firmware before the join works just makes debugging harder.
 
@@ -105,6 +109,8 @@ Then in the TTS Console, open the gateway -> it should show **Connected**, and *
 
 ## 4. The Things Stack: application + device (OTAA keys)
 
+> Automated now: `provision-lorawan` creates the end device and its OTAA keys for you and pushes them to the board. The steps below are the manual equivalent, kept for reference and debugging.
+
 ### 4a. Create the application
 
 Console -> **Applications** -> **+ Create application** -> give it an **Application ID** (lowercase, e.g. `growthpulse`) -> Create.
@@ -132,6 +138,8 @@ Because RadioLib's DevNonce increments and resets to a low value when you reflas
 ---
 
 ## 5. Uplink payload: byte layout, decoder, and webhook
+
+> Automated now: the `lorawan-uplink` webhook decodes the 9 raw bytes itself, so no TTS payload formatter is required, and the webhook and its token are already configured on the production side. The formatter and webhook steps below are the manual/reference version (the byte layout in 5a is still exactly what the firmware sends).
 
 LoRaWAN frames are tiny (see Section 6 limits), so the node sends a packed binary payload, not JSON. The Things Stack decodes it with a JavaScript **payload formatter**, then a **webhook** POSTs the decoded JSON to our endpoint.
 
@@ -222,7 +230,9 @@ RadioLib is **Class A only**, which is correct for a battery sensor. The consequ
 
 ---
 
-## 8. Combined Wi-Fi + LoRaWAN firmware (after the join works)
+## 8. Combined Wi-Fi + LoRaWAN firmware (implemented as GP_Combined)
+
+> This is built and shipping as `firmware/GP_Combined/GP_Combined.ino`, with the app's transport picker driving the switch. The design notes below explain how it works.
 
 One ESP32-S3 firmware can hold **both** stacks and pick one at boot. The two radios are independent (on-die 2.4 GHz Wi-Fi vs external SX1262 sub-GHz), but a sensor only ever uses one path per deployment, so we choose at boot and never bring up the other.
 

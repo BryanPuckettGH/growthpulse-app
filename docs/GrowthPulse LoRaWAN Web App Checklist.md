@@ -1,65 +1,47 @@
-# GrowthPulse LoRaWAN Setup — Web App Checklist (Bryan)
+# GrowthPulse LoRaWAN Setup: Web App Checklist (Bryan)
 
-Your job: get the LoRaWAN code deployed and wire the webhook into the app, so a node your teammate brings up in The Things Stack shows up in the app like any Wi-Fi node. Your teammate handles the gateway, The Things Stack, and the node join (separate checklist); you handle GitHub + Netlify.
+Your side is what makes a teammate's or customer's LoRaWAN node show up in the app automatically. It is already built and deployed on `main` (live on growthpulsecloud.com), so this is the configuration to keep correct, not a fresh build. There is **nothing to collect from a teammate** anymore: no device ID, no shared token. The app auto-provisions each node and routes its data by itself.
 
-**Two things you need from your teammate** (this is how the two halves connect):
-1. Their TTS **device ID** (from step 4 of their checklist).
-2. The agreed **webhook secret token** (any long random string you both use).
+## What's deployed
 
----
+- `netlify/functions/provision-lorawan.js` generates OTAA keys, creates the node's TTS device, stores the route in Supabase, and pushes the keys to the board.
+- `netlify/functions/register-gateway.js` registers a teammate or customer gateway on TTS when they add it in the app.
+- `netlify/functions/lorawan-uplink.js` is the webhook TTS calls; it decodes the 9 raw bytes and forwards the reading into Losant (same pipeline as Wi-Fi).
+- `netlify/functions/lorawan-switch-wifi.js` switches a node back to Wi-Fi.
+- `firmware/GP_Combined/GP_Combined.ino` is the one firmware that runs both transports.
 
-## 1. Protect main, work on a branch
+## 1. Route table (one-time)
 
-```
-cd "Senior Design 2/growthpulse-app"
-git tag -a v2.12.2 -m "Stable before LoRaWAN" && git push --tags
-git checkout -b lorawan-bringup
-```
-Now `main` is tagged and safe; if anything goes sideways, `git checkout v2.12.2`.
+Supabase -> SQL Editor -> run `docs/growthpulse-lorawan-routes-schema-v2.sql`. This creates the `lorawan_devices` table the provisioner writes and the webhook reads. It is what auto-routes each node, so there is no hand-kept map.
 
-## 2. Commit + push the LoRaWAN files
+## 2. Netlify environment variables
 
-These are already created in the repo:
-- `netlify/functions/lorawan-uplink.js`  (the webhook that lands uplinks in the app pipeline)
-- `firmware/GP_LoRaWAN/GP_LoRaWAN.ino`  (the node firmware your teammate flashes)
-- `docs/GrowthPulse LoRaWAN Bring-Up Guide.(md/pdf)` and both checklists
-
-```
-git add . && git commit -m "LoRaWAN bring-up: webhook, bench firmware, guide" && git push -u origin lorawan-bringup
-```
-
-The webhook function goes live when this is deployed. You can deploy the branch as a Netlify deploy preview, or merge to `main` when you're ready for it on the live site. (Netlify auto-builds on push.)
-
-## 3. Set the Netlify environment variables
-
-Netlify → your site → **Site configuration → Environment variables**. Add:
+Site configuration -> Environment variables. These drive the LoRaWAN side:
 
 | Variable | Value |
 |---|---|
-| `LORAWAN_WEBHOOK_TOKEN` | the **secret token** you agreed with your teammate (must match the TTS webhook header exactly) |
-| `LORAWAN_DEVICE_MAP` | JSON mapping their TTS device ID to a Losant device id, e.g. `{"their-device-id":"6a1fb486df527c8bf8d3324b"}` |
+| `TTS_API_KEY` | TTS API key with create/read/write on end devices **and** gateways |
+| `TTS_APP_ID` | your TTS application id (`growthpulse`) |
+| `TTS_USER_ID` | your TTS username (owns the auto-registered gateways) |
+| `TTS_CLUSTER` | `nam1.cloud.thethings.network` (default if unset) |
+| `TTS_FREQ_PLAN` | `US_902_928_FSB_2` (default if unset) |
+| `LORAWAN_WEBHOOK_TOKEN` | shared secret in the TTS webhook header, so only TTS can call the uplink function |
 
-Already set from before (confirm they exist): `LOSANT_APP_ID`, `LOSANT_COMMAND_TOKEN`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`.
+Already set and still required: `LOSANT_APP_ID`, `LOSANT_COMMAND_TOKEN`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`. Redeploy after changing any env var.
 
-> `6a1fb486df527c8bf8d3324b` is your existing node's Losant device id. Use a different Losant device id if you want the LoRaWAN node to be a separate plant in the app. (If you'd rather not keep a map, you can instead set `LORAWAN_DEFAULT_DEVICE_ID` to a single Losant device id and skip `LORAWAN_DEVICE_MAP`.)
+> The old `LORAWAN_DEVICE_MAP` (hand-mapping a TTS device to a Losant device) is no longer needed; routing is automatic via the Supabase table. `LORAWAN_DEFAULT_DEVICE_ID` exists only as a last-resort fallback if no route is found.
 
-Trigger a redeploy after adding env vars (Netlify → Deploys → Trigger deploy) so the function picks them up.
+## 3. The TTS application + webhook (one-time)
+
+The uplink webhook is configured on the `growthpulse` TTS application:
+- **Application -> Integrations -> Webhooks -> Custom webhook**, Base URL `https://growthpulsecloud.com/.netlify/functions/lorawan-uplink`, uplink message path `/`, header `X-Webhook-Token` set to the same value as `LORAWAN_WEBHOOK_TOKEN`.
+- No per-device payload formatter is required; the function decodes the raw bytes itself.
 
 ## 4. Verify it end to end
 
-Once your teammate's node is joined and uplinking, and your function is deployed with the env vars:
-1. Netlify → **Functions → lorawan-uplink → logs**: you should see `forwarded: true` each time an uplink arrives (~every 60s in test).
-2. Open the app → the mapped device should show live readings, and the connection badge should read **LoRaWAN** (the app shows the real link from the node's data).
-3. If logs show `401 Bad webhook token` → the token in Netlify and the TTS webhook header don't match. `404 No Losant mapping` → the device id in `LORAWAN_DEVICE_MAP` doesn't match their TTS device ID.
+With a teammate's node provisioned and uplinking:
+1. Netlify -> **Functions -> lorawan-uplink -> logs**: each uplink logs `forwarded: true` (about every 60s in test).
+2. The node shows live in the app with a **LoRaWAN** badge.
+3. Log reads: `401 Bad webhook token` means `LORAWAN_WEBHOOK_TOKEN` does not match the TTS header. `404 No Losant mapping` means the Supabase route was not stored for that TTS device (check that `provision-lorawan` ran and the `lorawan_devices` row exists).
 
-## 5. When it works
-
-Merge the branch to `main`:
-```
-git checkout main && git merge lorawan-bringup && git push
-```
-If you ever need to back out: `git checkout v2.12.2` returns you to the pre-LoRaWAN state.
-
----
-
-**You're done when:** the Netlify function logs show forwarded uplinks and the LoRaWAN node appears live in the app. The next build step (merging LoRaWAN into the main firmware as a boot-selectable mode) happens after the join is proven, see Bring-Up Guide §8.
+**You're done when:** the function logs show forwarded uplinks and the LoRaWAN node appears live in the app, with no manual mapping or token exchange.

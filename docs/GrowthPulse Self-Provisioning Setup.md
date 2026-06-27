@@ -58,7 +58,7 @@ to the same string you used for `PROVISION_TOKEN` in Netlify. This is the ONLY v
 cd "Senior Design 2/growthpulse-app"
 git add . && git commit -m "Self-provisioning: provision-device function + GP_Node firmware" && git push
 ```
-(Do it on your `lorawan-bringup` branch or a fresh branch; merge to `main` when you're happy. Netlify builds on push.)
+(Push to `main`, or to a branch and merge when you're happy. Netlify builds on push.)
 
 ---
 

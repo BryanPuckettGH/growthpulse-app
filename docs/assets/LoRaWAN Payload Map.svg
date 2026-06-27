@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 300" font-family="Helvetica, Arial, sans-serif">
+  <rect width="920" height="300" fill="#ffffff"/>
+  <text x="460" y="32" font-size="18" font-weight="bold" fill="#2c3e50" text-anchor="middle">LoRaWAN Uplink Payload  (9 bytes, fPort 2, big-endian)</text>
+
+  <!-- byte cells -->
+  <g font-size="11" text-anchor="middle">
+    <!-- soil temp -->
+    <rect x="60" y="70" width="180" height="56" fill="#dff5e9" stroke="#1a9b5a" stroke-width="2"/>
+    <line x1="150" y1="70" x2="150" y2="126" stroke="#1a9b5a" stroke-dasharray="4,3"/>
+    <text x="105" y="62" fill="#7f8c8d">byte 0</text><text x="195" y="62" fill="#7f8c8d">byte 1</text>
+    <text x="150" y="95" font-weight="bold" fill="#2c3e50">soilTemperatureF x 10</text>
+    <text x="150" y="113" fill="#2c3e50">int16</text>
+
+    <!-- air temp -->
+    <rect x="240" y="70" width="180" height="56" fill="#e6f4fd" stroke="#13a4ff" stroke-width="2"/>
+    <line x1="330" y1="70" x2="330" y2="126" stroke="#13a4ff" stroke-dasharray="4,3"/>
+    <text x="285" y="62" fill="#7f8c8d">byte 2</text><text x="375" y="62" fill="#7f8c8d">byte 3</text>
+    <text x="330" y="95" font-weight="bold" fill="#2c3e50">airTemperatureF x 10</text>
+    <text x="330" y="113" fill="#2c3e50">int16</text>
+
+    <!-- humidity -->
+    <rect x="420" y="70" width="90" height="56" fill="#fff7e8" stroke="#f4a52b" stroke-width="2"/>
+    <text x="465" y="62" fill="#7f8c8d">byte 4</text>
+    <text x="465" y="95" font-weight="bold" fill="#2c3e50">humidity</text>
+    <text x="465" y="113" fill="#2c3e50">uint8, %</text>
+
+    <!-- soil raw -->
+    <rect x="510" y="70" width="180" height="56" fill="#f3eefe" stroke="#a06bff" stroke-width="2"/>
+    <line x1="600" y1="70" x2="600" y2="126" stroke="#a06bff" stroke-dasharray="4,3"/>
+    <text x="555" y="62" fill="#7f8c8d">byte 5</text><text x="645" y="62" fill="#7f8c8d">byte 6</text>
+    <text x="600" y="95" font-weight="bold" fill="#2c3e50">soilRaw</text>
+    <text x="600" y="113" fill="#2c3e50">uint16, 0..4095</text>
+
+    <!-- moisture -->
+    <rect x="690" y="70" width="90" height="56" fill="#dff5e9" stroke="#2ecc71" stroke-width="2"/>
+    <text x="735" y="62" fill="#7f8c8d">byte 7</text>
+    <text x="735" y="95" font-weight="bold" fill="#2c3e50">moisture</text>
+    <text x="735" y="113" fill="#2c3e50">uint8, %</text>
+
+    <!-- battery -->
+    <rect x="780" y="70" width="90" height="56" fill="#fdeaea" stroke="#ef4444" stroke-width="2"/>
+    <text x="825" y="62" fill="#7f8c8d">byte 8</text>
+    <text x="825" y="95" font-weight="bold" fill="#2c3e50">battery</text>
+    <text x="825" y="113" fill="#2c3e50">uint8, %</text>
+  </g>
+
+  <!-- sentinel notes -->
+  <g font-size="10.5" fill="#2c3e50">
+    <text x="60" y="170" font-weight="bold">Absent-sensor sentinels</text>
+    <text x="60" y="190">soil temperature: 0x8000 means no probe (the webhook converts it to null)</text>
+    <text x="60" y="207">battery: 0xFF means unknown / AC powered</text>
+    <text x="60" y="224">soilRaw 0 means no probe detected (raw under 300 or noisy spread)</text>
+  </g>
+  <g font-size="10.5" fill="#2c3e50">
+    <text x="520" y="170" font-weight="bold">Why 9 bytes</text>
+    <text x="520" y="190">US915 DR0 (slowest, longest range) allows 11 application bytes,</text>
+    <text x="520" y="207">so this frame transmits at every data rate. Decoded server-side by</text>
+    <text x="520" y="224">lorawan-uplink, with no per-device TTS formatter required.</text>
+  </g>
+
+  <rect x="60" y="246" width="810" height="34" rx="8" fill="#eef0f2"/>
+  <text x="465" y="268" font-size="10.5" fill="#2c3e50" text-anchor="middle">Downlink: a single byte 0x00 in the same exchange means "switch back to Wi-Fi"; the node writes its mode flag and reboots.</text>
+</svg>

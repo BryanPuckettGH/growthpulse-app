@@ -1,0 +1,79 @@
+<svg viewBox="0 0 760 470" xmlns="http://www.w3.org/2000/svg" font-family="Helvetica, Arial, sans-serif">
+  <style>
+    .title { font-size: 20px; font-weight: 700; fill: #1f2d36; }
+    .sub   { font-size: 12.5px; fill: #5f6b76; }
+    .lbl   { font-size: 13px; fill: #26313a; }
+    .pin   { font-size: 13px; font-weight: 700; fill: #1f2d36; }
+    .val   { font-size: 12.5px; font-weight: 700; fill: #1f8b4c; }
+    .note  { font-size: 12.5px; fill: #26313a; }
+    .wire  { stroke: #2c3e50; stroke-width: 2.4; fill: none; }
+    .res   { fill: #ffffff; stroke: #2c3e50; stroke-width: 2.4; }
+    .board { fill: #f1f6f3; stroke: #2ecc71; stroke-width: 2.5; }
+    .dot   { fill: #2c3e50; }
+    .gnd   { stroke: #2c3e50; stroke-width: 2.4; }
+  </style>
+
+  <!-- Title -->
+  <text x="30" y="34" class="title">Optional VBUS Sense Mod</text>
+  <text x="30" y="54" class="sub">True USB-power vs battery detection (the board has no battery-detect pin)</text>
+
+  <!-- Board -->
+  <rect x="40" y="150" width="150" height="170" rx="10" class="board"/>
+  <text x="115" y="205" text-anchor="middle" class="pin">GrowthPulse</text>
+  <text x="115" y="223" text-anchor="middle" class="lbl">node</text>
+  <text x="115" y="241" text-anchor="middle" class="sub">(Heltec V3)</text>
+
+  <!-- Board pins (stubs on the right edge) -->
+  <!-- 5V pin -->
+  <line x1="190" y1="180" x2="230" y2="180" class="wire"/>
+  <text x="196" y="173" class="pin">5V</text>
+  <!-- GPIO7 pin -->
+  <line x1="190" y1="250" x2="230" y2="250" class="wire"/>
+  <text x="196" y="243" class="pin">GPIO7</text>
+  <!-- GND pin -->
+  <line x1="190" y1="320" x2="230" y2="320" class="wire"/>
+  <text x="196" y="313" class="pin">GND</text>
+
+  <!-- Divider column at x=560 -->
+  <!-- 5V up to R1 -->
+  <line x1="230" y1="180" x2="560" y2="180" class="wire"/>
+  <line x1="560" y1="180" x2="560" y2="120" class="wire"/>
+  <text x="560" y="112" text-anchor="middle" class="lbl">from board 5V</text>
+
+  <!-- R1 -->
+  <rect x="546" y="180" width="28" height="70" rx="3" class="res"/>
+  <text x="584" y="210" class="lbl">R1</text>
+  <text x="584" y="227" class="val">100 kohm</text>
+
+  <!-- midpoint junction -->
+  <line x1="560" y1="250" x2="560" y2="300" class="wire"/>
+  <circle cx="560" cy="300" r="4.5" class="dot"/>
+  <text x="572" y="296" class="lbl">midpoint</text>
+
+  <!-- midpoint tap to GPIO7 -->
+  <line x1="560" y1="300" x2="230" y2="300" class="wire"/>
+  <line x1="230" y1="300" x2="230" y2="250" class="wire"/>
+  <text x="300" y="293" class="lbl">tap to GPIO7</text>
+
+  <!-- R2 -->
+  <rect x="546" y="330" width="28" height="70" rx="3" class="res"/>
+  <text x="584" y="360" class="lbl">R2</text>
+  <text x="584" y="377" class="val">100 kohm</text>
+  <line x1="560" y1="300" x2="560" y2="330" class="wire"/>
+
+  <!-- GND symbol -->
+  <line x1="560" y1="400" x2="560" y2="424" class="wire"/>
+  <line x1="538" y1="424" x2="582" y2="424" class="gnd"/>
+  <line x1="545" y1="431" x2="575" y2="431" class="gnd"/>
+  <line x1="552" y1="438" x2="568" y2="438" class="gnd"/>
+  <text x="560" y="455" text-anchor="middle" class="sub">to board GND</text>
+
+  <!-- Readings panel -->
+  <rect x="30" y="360" width="350" height="92" rx="10" fill="#f7f9fa" stroke="#e3e8ec" stroke-width="1.5"/>
+  <text x="46" y="386" class="note"><tspan font-weight="700" fill="#1f8b4c">On USB power:</tspan> 5V present, GPIO7 reads about 2.5V (HIGH)</text>
+  <text x="46" y="410" class="note"><tspan font-weight="700" fill="#c0392b">On battery only:</tspan> no 5V, GPIO7 reads 0V (LOW)</text>
+  <text x="46" y="438" class="sub">Firmware reads GPIO7 to know the power source for certain.</text>
+
+  <!-- Footnote -->
+  <text x="400" y="455" class="sub">Tap the board's labeled 5V header pin (not inside the USB-C cable). Enable with USE_VBUS_SENSE = 1.</text>
+</svg>
