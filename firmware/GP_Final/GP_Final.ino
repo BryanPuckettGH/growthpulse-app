@@ -1,5 +1,5 @@
 /* ============================================================
-   GrowthPulse Node Firmware  v4.3  (COMBINED Wi-Fi + LoRaWAN)
+   GrowthPulse Node Firmware  v5.0  (FINAL - Wi-Fi + LoRaWAN + Valve)
    ------------------------------------------------------------
    Board: Heltec WiFi LoRa 32 V3 (ESP32-S3 + Semtech SX1262)
 
@@ -83,7 +83,7 @@
 #define SX_MISO  11
 #define SX_MOSI  10
 
-#define FW_VERSION "4.3"
+#define FW_VERSION "5.0"
 #define WDT_TIMEOUT_S 60
 #define DIM_AFTER_MS (5UL * 60UL * 1000UL)
 #define SELFTEST_HOLD_MS 10000
