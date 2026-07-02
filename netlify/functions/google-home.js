@@ -76,6 +76,23 @@ export const handler = async (event) => {
         },
       });
       devices.push({
+        id: `${d.id}:air`,
+        type: 'action.devices.types.SENSOR',
+        traits: [
+          'action.devices.traits.TemperatureControl',
+          'action.devices.traits.HumiditySetting',
+        ],
+        name: { name: `${d.name || 'Plant'} air` },
+        willReportState: false,
+        roomHint: d.location || undefined,
+        attributes: {
+          queryOnlyTemperatureControl: true,
+          temperatureUnitForUX: 'F',
+          temperatureRange: { minThresholdCelsius: -20, maxThresholdCelsius: 60 },
+          queryOnlyHumiditySetting: true,
+        },
+      });
+      devices.push({
         id: `${d.id}:valve`,
         type: 'action.devices.types.SPRINKLER',
         traits: ['action.devices.traits.StartStop', 'action.devices.traits.Timer'],
@@ -104,15 +121,19 @@ export const handler = async (event) => {
       const dev = await ownedDevice(rest, userId, rowId);
       if (!dev) { states[id] = { online: false, status: 'ERROR', errorCode: 'deviceNotFound' }; return; }
 
-      if (kind === 'sensor') {
+      if (kind === 'sensor' || kind === 'air') {
         const s = await losantState(dev.losant_device_id);
         if (!s) { states[id] = { online: false, status: 'OFFLINE' }; return; }
+        // :sensor = soil probe (moisture rides on the humidity trait);
+        // :air = DHT22 air temperature + true relative humidity.
+        const tempF = kind === 'air' ? s.airTemperatureF : s.soilTemperatureF;
+        const hum = kind === 'air' ? s.airHumidity : s.soilMoisturePercent;
         states[id] = {
           online: true,
           status: 'SUCCESS',
-          temperatureAmbientCelsius: fToC(s.soilTemperatureF),
-          temperatureSetpointCelsius: fToC(s.soilTemperatureF),
-          humidityAmbientPercent: s.soilMoisturePercent != null ? Math.round(s.soilMoisturePercent) : undefined,
+          temperatureAmbientCelsius: fToC(tempF),
+          temperatureSetpointCelsius: fToC(tempF),
+          humidityAmbientPercent: hum != null ? Math.round(hum) : undefined,
         };
       } else {
         // Valve: report from the mirrored run record.
@@ -215,7 +236,12 @@ const losantState = async (deviceId) => {
     if (!res.ok) return null;
     const s = await res.json();
     const num = (k) => (s[k] && typeof s[k].value === 'number' ? s[k].value : null);
-    return { soilTemperatureF: num('soilTemperatureF'), soilMoisturePercent: num('soilMoisturePercent') };
+    return {
+      soilTemperatureF: num('soilTemperatureF'),
+      soilMoisturePercent: num('soilMoisturePercent'),
+      airTemperatureF: num('airTemperatureF'),
+      airHumidity: num('airHumidity'),
+    };
   } catch { return null; }
 };
 
