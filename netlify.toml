@@ -15,3 +15,23 @@
 [functions."render-pdf"]
   external_node_modules = ["@sparticuz/chromium", "puppeteer-core"]
   included_files = ["node_modules/@sparticuz/chromium/**"]
+
+# Google Home integration - clean URLs on our own domain, as registered in the
+# Google Home Developer Console (project growthpulse-0da7b).
+[[redirects]]
+  from = "/oauth/authorize"
+  to = "/.netlify/functions/oauth-authorize"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/oauth/token"
+  to = "/.netlify/functions/oauth-token"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/google-home"
+  to = "/.netlify/functions/google-home"
+  status = 200
+  force = true

@@ -71,7 +71,8 @@
 #define VALVE_IN1 33
 #define VALVE_IN2 34
 #define VALVE_PULSE_MS 60         // latch pulse length (ms)
-#define VALVE_MAX_OPEN_MS 60000   // safety: auto-close if left open this long
+#define VALVE_MAX_OPEN_MS 60000   // default run: auto-close if no duration given
+#define VALVE_ABS_MAX_MS 600000   // absolute cap on any requested duration (10 min)
 
 // ----------------- SX1262 radio pins (Heltec V3) -----------------
 // These are the make-or-break numbers from the V3 schematic.
@@ -124,6 +125,9 @@ unsigned long losantConnectedAt = 0;
 const unsigned long CMD_GRACE_MS = 12000;
 // Irrigation valve: 0 = closed; otherwise millis() when opened (for the auto-close watchdog).
 unsigned long valveOpenedAt = 0;
+// How long the current run may last. Defaults to VALVE_MAX_OPEN_MS; a setValve
+// command with durationSeconds (e.g., "Hey Google, run for 10 seconds") overrides it.
+unsigned long valveOpenLimitMs = VALVE_MAX_OPEN_MS;
 
 // ----------------- On-board OLED (Heltec V3) -----------------
 #define VEXT_PIN 36
@@ -596,10 +600,16 @@ void handleCommand(LosantCommand *command) {
       Serial.println("provisionLoRa: bad/short keys, ignoring.");
     }
   } else if (strcmp(command->name, "setValve") == 0) {
-    // Payload { "open": true|false }. The latching solenoid holds with no power,
-    // so we just pulse it. (Left out of the grace-window ignore: the app always
-    // sends "close" last, so a redelivered command is a harmless re-close.)
-    bool open = (*command->payload)["open"].as<bool>();
+    // Payload { "open": true|false, "durationSeconds": N (optional) }. The
+    // latching solenoid holds with no power, so we just pulse it. On a timed
+    // run (Google Home "run for 10 seconds", or the app), the watchdog in
+    // loop() closes the valve after durationSeconds - the cloud never has to
+    // send a "close". (Left out of the grace-window ignore: a redelivered
+    // command is at worst a re-close or a re-open the watchdog still times out.)
+    JsonObject p = *command->payload;
+    bool open = p["open"].as<bool>();
+    unsigned long durMs = p["durationSeconds"].as<unsigned long>() * 1000UL;
+    valveOpenLimitMs = (durMs > 0 && durMs <= VALVE_ABS_MAX_MS) ? durMs : VALVE_MAX_OPEN_MS;
     pulseValve(open);
   }
 }
@@ -933,10 +943,12 @@ void loopLoRaWAN() {
 
 void loop() {
   esp_task_wdt_reset();
-  // Safety: if the valve was left open (e.g., a close command was lost), close it.
-  if (valveOpenedAt && (millis() - valveOpenedAt) > VALVE_MAX_OPEN_MS) {
-    Serial.println("Valve auto-close (max open reached)");
+  // Timed-run + safety watchdog: closes the valve when the requested duration
+  // (or the default limit) elapses, so a lost "close" command can't flood anything.
+  if (valveOpenedAt && (millis() - valveOpenedAt) > valveOpenLimitMs) {
+    Serial.println("Valve auto-close (run time reached)");
     pulseValve(false);
+    valveOpenLimitMs = VALVE_MAX_OPEN_MS;
   }
   if (netMode == "lorawan") loopLoRaWAN();
   else                      loopWiFi();
