@@ -1,9 +1,9 @@
 /* Small reusable UI building blocks: icons, pills, toggle, slider,
    stepper, gauge, badge. Kept in one file so the views stay short. */
-import { Thermometer, Droplets, Sprout, Waves, Wifi, RadioTower, CloudRain, Plug, BatteryFull, BatteryMedium, BatteryLow, BatteryCharging } from 'lucide-react';
+import { Thermometer, Droplets, Sprout, Waves, Wifi, RadioTower, CloudRain, Plug, BatteryFull, BatteryMedium, BatteryLow, BatteryCharging, Droplet, AlertTriangle } from 'lucide-react';
 import { powerInfo } from '../store/helpers';
 
-const METRIC_ICONS = { temp: Thermometer, humidity: Droplets, moisture: Sprout, soil: Waves, rain: CloudRain };
+const METRIC_ICONS = { temp: Thermometer, humidity: Droplets, moisture: Sprout, soil: Waves, rain: CloudRain, flow: Droplet, leak: AlertTriangle };
 const TRANSPORT_ICONS = { wifi: Wifi, lora: RadioTower };
 
 export function MetricIcon({ name, size = 18, color }) {

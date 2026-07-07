@@ -22,9 +22,48 @@ export const METRICS = {
   soilTemperatureF: { key: 'soilTemperatureF', label: 'Soil Temp', short: 'Soil Temp', unit: '°F', icon: 'soil', good: [62, 75], warn: [55, 82], min: 40, max: 95, color: '#a06bff' },
   // Not a device sensor: rain comes from the weather forecast, used only for rain alarms.
   rainChance: { key: 'rainChance', label: 'Rain chance', short: 'Rain', unit: '%', icon: 'rain', good: [0, 100], warn: [0, 100], min: 0, max: 100, color: '#13a4ff' },
+  // Water-meter fault flags (YF-S201, firmware 5.1+). These are boolean
+  // conditions, not thresholds: the alarm UI hides the slider for them and
+  // activeAlerts() trips on true.
+  flowFault: {
+    key: 'flowFault', label: 'No water flow', short: 'No flow', unit: '', icon: 'flow',
+    boolean: true, alertText: 'valve opened but no water flowed',
+    description: 'Trips when watering starts but the flow sensor sees no water — empty reservoir, kinked line, or a dead pump. The node closes the valve automatically for safety.',
+    good: [0, 0], warn: [0, 0], min: 0, max: 1, color: '#ef4444',
+  },
+  leakDetected: {
+    key: 'leakDetected', label: 'Water leak', short: 'Leak', unit: '', icon: 'leak',
+    boolean: true, alertText: 'water flowing while the valve is closed',
+    description: 'Trips when water keeps moving for 30+ seconds while the valve is closed — a stuck valve or a leak downstream of the sensor.',
+    good: [0, 0], warn: [0, 0], min: 0, max: 1, color: '#ef4444',
+  },
 };
 
 export const METRIC_ORDER = ['airTemperatureF', 'airHumidity', 'soilMoisturePercent', 'soilTemperatureF'];
+// Everything the "add alarm" sheet offers: the four sensors plus the water faults.
+export const ALARM_METRICS = [...METRIC_ORDER, 'flowFault', 'leakDetected'];
+
+// --- water metering: unit conversion + cost ---
+export const L_PER_GAL = 3.78541;
+export const litersToUnit = (liters, unit) => (unit === 'gal' ? liters / L_PER_GAL : liters);
+export const volumeUnitLabel = (unit) => (unit === 'gal' ? 'gal' : 'L');
+export function formatVolume(liters, unit, digits = 1) {
+  if (liters == null) return '—';
+  return `${litersToUnit(liters, unit).toFixed(digits)} ${volumeUnitLabel(unit)}`;
+}
+// Cost of `liters` at the user's rate. The rate is stored per 1,000 of the
+// user's chosen unit (per 1,000 gal or per 1,000 L), the way utility bills
+// quote it.
+export function waterCost(liters, settings) {
+  if (liters == null) return null;
+  const unit = (settings && settings.waterUnit) || 'gal';
+  const rate = Number(settings && settings.waterPricePerK) || 0;
+  return (litersToUnit(liters, unit) / 1000) * rate;
+}
+export function formatMoney(v) {
+  if (v == null) return '—';
+  return v >= 100 ? `$${Math.round(v)}` : `$${v.toFixed(2)}`;
+}
 
 // Plant catalog lives in plants.js (a large searchable database). Re-export it
 // here so existing imports keep working.
@@ -203,11 +242,13 @@ export function activeAlerts(devices, rules, weather) {
       continue;
     }
 
+    const meta = METRICS[r.metric];
     for (const d of devices) {
       if (r.deviceId && r.deviceId !== 'all' && r.deviceId !== d.id) continue;
       const v = d.reading[r.metric];
       if (v == null) continue;
-      const hit = r.op === 'below' ? v < r.value : v > r.value;
+      // Boolean fault flags (no flow, leak) trip on true; no threshold involved.
+      const hit = meta && meta.boolean ? v === true : (r.op === 'below' ? v < r.value : v > r.value);
       if (hit) out.push({ device: d, rule: r, value: v });
     }
   }

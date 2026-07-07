@@ -6,6 +6,14 @@ All notable changes to GrowthPulse, the web app and the device firmware.
 
 ## Web App
 
+### v2.23.0 - July 7, 2026
+- Water metering, from the new YF-S201 flow sensor (firmware 5.1). The Live view gains a Water card: live flow rate while watering, water used today / this week / this month with dollar costs, the current/last run's volume, and the lifetime total. Costs use a user-set rate in Settings ("$ per 1,000 gallons", straight off the utility bill), with a gallons/liters toggle that converts the rate when flipped.
+- Smart watering warnings. If a watering run opens the valve and the sensor sees no water (empty reservoir, kinked line, dead pump), the node closes the valve itself and the app shows a "No water flow detected" banner; a `flowFault` alarm rule is on by default. A leak alarm trips when water flows for 30+ seconds while the valve is closed. Both are boolean fault alarms: the alarm card explains the condition instead of showing a threshold slider.
+- The Watering card now shows live confirmation from the flow sensor during a run ("Flowing 1.9 L/min" or "Waiting for water to move...") so a dry run is visible the moment it happens.
+- New `water-usage` function: usage per day computed meter-style by diffing the node's cumulative `waterTotalL` counter (MAX per bucket), which stays accurate across missed samples and handles counter resets. `device-state` passes the six new water fields through; `provision-device` defines them on new devices; `scripts/add-water-attributes.mjs` backfills devices provisioned before they existed (Losant drops state for undefined attributes, so run it once).
+- The LoRaWAN uplink webhook now decodes both payload layouts by length: legacy 9-byte v1 and the new 11-byte v2 that carries flow, total, and the valve/fault/leak status bits (v2 drops the raw soil ADC to stay inside the US915 DR0 11-byte limit; moisture 0xFF now marks a disconnected probe).
+- The device simulator publishes the water fields too, including a periodic simulated no-flow run, so the whole feature can be demoed without hardware.
+
 ### v2.22.2 - June 12, 2026
 - Fixed `resets_join_nonces` never actually being set. It was being written to the Network Server, which rejects it as a forbidden field-mask path, so provisioning's attempt silently failed (and a new-device provision would have errored at that step). It is a Join Server setting; it now goes on the `js/` endpoint in both the create and reuse paths. With it set, a board joins LoRaWAN on the first try after a reflash instead of burning a minute of `-1116` DevNonce-catch-up retries.
 
@@ -164,7 +172,14 @@ All notable changes to GrowthPulse, the web app and the device firmware.
 
 ## Device Firmware (GP_Combined, Wi-Fi + LoRaWAN)
 
-One identical image that boots into either Wi-Fi or LoRaWAN based on a saved flag in flash (NVS). No per-board secrets live in the image. This is the firmware that ships on production units.
+One identical image that boots into either Wi-Fi or LoRaWAN based on a saved flag in flash (NVS). No per-board secrets live in the image. This is the firmware that ships on production units. (v5.x lives in `firmware/GP_Final`.)
+
+### v5.1 - July 7, 2026
+- Water flow metering with the YF-S201 hall-effect sensor on GPIO47 (450 pulses/L, counted by interrupt). Reports live flow (L/min), the current/last run's liters, and a lifetime total that persists in NVS with wear-friendly writes (every 2 L and at the end of each run). Wiring note: the sensor runs on 5V and outputs 5V pulses; the signal must pass through a 10k/20k divider because the ESP32-S3 is not 5V tolerant (see the Water Sensor Guide).
+- No-flow watchdog: if the valve is open for 8 seconds and the line is still dry, the node closes the valve itself, shows NO WATER FLOW on the OLED, and latches a `flowFault` that reports to the app until a later run actually sees water. Protects the pump and stops phantom watering.
+- Leak watchdog: sustained flow (30 s) while the valve is closed raises `leakDetected`; clears itself when the flow stops.
+- A fourth OLED page (WATER) rotates in: live flow, last run, lifetime total, and any active fault.
+- LoRaWAN uplink grows to the 11-byte v2 layout carrying flow, total, and valve/fault/leak status bits, still within the US915 DR0 application-payload limit. The webhook decodes v1 and v2 by length, so mixed fleets keep working.
 
 ### v4.3 - June 12, 2026
 - The OLED pairing screen now shows the running firmware version (small, just under the connection type), so the build on a unit is visible at a glance without opening the serial monitor.

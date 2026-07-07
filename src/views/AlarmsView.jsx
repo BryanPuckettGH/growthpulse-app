@@ -1,13 +1,15 @@
 import { useState } from 'react';
 import { useApp } from '../store/AppContext';
-import { METRICS, METRIC_ORDER, activeAlerts, alarmsFromPlant, rangesForDevice } from '../store/helpers';
+import { METRICS, ALARM_METRICS, activeAlerts, alarmsFromPlant, rangesForDevice } from '../store/helpers';
 import { Pills, Slider, Toggle, MetricIcon } from '../components/UI';
 import { AlertTriangle, Plus, Trash2, Wand2 } from 'lucide-react';
 
 // Seed a reasonable rule for a chosen sensor: high-side for temperatures,
-// low-side for moisture and humidity.
+// low-side for moisture and humidity. Boolean faults (no flow, leak) have no
+// threshold; they simply trip when the node reports the condition.
 function defaultRuleFor(metric) {
   const m = METRICS[metric];
+  if (m.boolean) return { metric, op: 'above', value: 0 };
   const high = metric === 'airTemperatureF' || metric === 'soilTemperatureF';
   return { metric, op: high ? 'above' : 'below', value: high ? m.good[1] : m.good[0] };
 }
@@ -34,9 +36,9 @@ export default function AlarmsView() {
           <div className="card tight" key={'al' + i} style={{ borderLeft: '4px solid #ef4444' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <b>{a.device.name}</b>
-              <span style={{ color: '#ef4444', fontWeight: 700 }}>{a.value}{m.unit}</span>
+              <span style={{ color: '#ef4444', fontWeight: 700 }}>{m.boolean ? m.short : `${a.value}${m.unit}`}</span>
             </div>
-            <div className="muted">{m.label} is {a.rule.op} {a.rule.value}{m.unit}</div>
+            <div className="muted">{m.boolean ? `${m.label}: ${m.alertText}` : `${m.label} is ${a.rule.op} ${a.rule.value}${m.unit}`}</div>
           </div>
         );
       })}
@@ -60,15 +62,23 @@ export default function AlarmsView() {
                 <option value="all">All devices</option>
                 {devices.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
               </select>
-              <div style={{ marginBottom: 14 }}>
-                <Pills options={[{ value: 'below', label: 'Below' }, { value: 'above', label: 'Above' }]} value={rule.op} onChange={(v) => updateAlarmRule(rule.id, { op: v })} blue />
-              </div>
-              <div className="field__row">
-                <span className="muted">Trigger threshold</span>
-                <span className="field__value">{rule.value}{m.unit}</span>
-              </div>
-              <Slider min={m.min} max={m.max} value={rule.value} onChange={(v) => updateAlarmRule(rule.id, { value: v })} />
-              <div className="ticks"><span>{m.min}{m.unit}</span><span>{m.max}{m.unit}</span></div>
+              {m.boolean ? (
+                // Fault alarms have no threshold: the node reports the condition
+                // directly, so the card just explains what trips it.
+                <p className="muted" style={{ margin: '2px 0 4px' }}>{m.description}</p>
+              ) : (
+                <>
+                  <div style={{ marginBottom: 14 }}>
+                    <Pills options={[{ value: 'below', label: 'Below' }, { value: 'above', label: 'Above' }]} value={rule.op} onChange={(v) => updateAlarmRule(rule.id, { op: v })} blue />
+                  </div>
+                  <div className="field__row">
+                    <span className="muted">Trigger threshold</span>
+                    <span className="field__value">{rule.value}{m.unit}</span>
+                  </div>
+                  <Slider min={m.min} max={m.max} value={rule.value} onChange={(v) => updateAlarmRule(rule.id, { value: v })} />
+                  <div className="ticks"><span>{m.min}{m.unit}</span><span>{m.max}{m.unit}</span></div>
+                </>
+              )}
               <button className="btn btn--ghost" style={{ marginTop: 12 }} onClick={() => removeAlarmRule(rule.id)}>
                 <Trash2 size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />Remove rule
               </button>
@@ -99,7 +109,7 @@ function AddAlarmSheet({ onPick, onClose }) {
         <h2>New alarm</h2>
         <p className="muted" style={{ marginTop: -6, marginBottom: 12 }}>Which sensor should this alarm watch?</p>
         <div className="plantgrid">
-          {METRIC_ORDER.map((k) => {
+          {ALARM_METRICS.map((k) => {
             const m = METRICS[k];
             return (
               <button key={k} className="plantopt" onClick={() => onPick(k)}>

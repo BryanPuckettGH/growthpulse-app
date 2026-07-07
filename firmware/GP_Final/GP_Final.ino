@@ -1,7 +1,14 @@
 /* ============================================================
-   GrowthPulse Node Firmware  v5.0  (FINAL - Wi-Fi + LoRaWAN + Valve)
+   GrowthPulse Node Firmware  v5.1  (FINAL - Wi-Fi + LoRaWAN + Valve + Flow)
    ------------------------------------------------------------
    Board: Heltec WiFi LoRa 32 V3 (ESP32-S3 + Semtech SX1262)
+
+   v5.1 adds the YF-S201 water flow sensor on GPIO47: live flow rate,
+   session + lifetime water totals (persisted in NVS), a no-flow
+   watchdog that closes the valve and raises a fault when a watering
+   run sees no water, and a leak watchdog for flow while the valve is
+   closed. See "docs/GrowthPulse Water Sensor Guide.md" for the
+   5V->3.3V divider wiring.
 
    ONE image, both network stacks. A saved "mode" flag in flash
    (NVS) decides the boot path:
@@ -74,6 +81,22 @@
 #define VALVE_MAX_OPEN_MS 60000   // default run: auto-close if no duration given
 #define VALVE_ABS_MAX_MS 600000   // absolute cap on any requested duration (10 min)
 
+// ----------------- Water flow sensor (YF-S201) -----------------
+// Hall-effect pulse output: 450 pulses/liter, F(Hz) = 7.5 * L/min, +-10%.
+// The sensor needs 5V power (min 4.5V) and outputs 5V pulses; the ESP32-S3
+// is NOT 5V tolerant, so the signal line must come through a divider
+// (10k series from sensor OUT, 20k to GND -> ~3.3V at the pin). The
+// divider's lower leg also keeps the pin from floating (= phantom pulses)
+// when the sensor is unplugged.
+#define FLOW_PIN 47
+#define FLOW_PULSES_PER_L 450.0f
+#define FLOW_CALIBRATION  1.00f   // jug-test trim; sensor spec is +-10%
+#define FLOW_MIN_LPM      0.5f    // below this during a run = "no flow"
+#define FLOW_GRACE_MS     8000    // let the line fill/pressurize before judging
+#define LEAK_MIN_LPM      0.3f    // flow with the valve closed = suspicious
+#define LEAK_CONFIRM_MS   30000   // sustained that long before calling it a leak
+#define FLOW_SAVE_DELTA_L 2.0f    // persist the lifetime total every 2 L (wear-friendly)
+
 // ----------------- SX1262 radio pins (Heltec V3) -----------------
 // These are the make-or-break numbers from the V3 schematic.
 #define SX_NSS   8
@@ -84,7 +107,7 @@
 #define SX_MISO  11
 #define SX_MOSI  10
 
-#define FW_VERSION "5.0"
+#define FW_VERSION "5.1"
 #define WDT_TIMEOUT_S 60
 #define DIM_AFTER_MS (5UL * 60UL * 1000UL)
 #define SELFTEST_HOLD_MS 10000
@@ -100,7 +123,7 @@
 #define LORA_UPLINK_MS (60UL * 1000UL)
 
 #define PAGE_MS 5000
-#define PAGE_COUNT 3
+#define PAGE_COUNT 4
 
 // ----------------- Battery (Heltec V3) -----------------
 #define VBAT_CTRL 37
@@ -128,6 +151,20 @@ unsigned long valveOpenedAt = 0;
 // How long the current run may last. Defaults to VALVE_MAX_OPEN_MS; a setValve
 // command with durationSeconds (e.g., "Hey Google, run for 10 seconds") overrides it.
 unsigned long valveOpenLimitMs = VALVE_MAX_OPEN_MS;
+
+// ----------------- Water flow state -----------------
+volatile uint32_t flowPulses = 0;      // bumped by the ISR, drained by waterTick()
+void IRAM_ATTR flowIsr() { flowPulses++; }
+
+float flowLpm = 0;             // live flow rate (L/min)
+float waterTotalL = 0;         // lifetime liters, persisted in NVS
+float waterSessionL = 0;       // liters in the current/most recent valve run
+float waterUnsavedL = 0;       // liters accumulated since the last NVS save
+bool  flowFault = false;       // valve opened but no water arrived (latched
+                               // until a later run actually sees flow)
+bool  leakDetected = false;    // sustained flow while the valve is closed
+unsigned long lastFlowCalcMs = 0;
+unsigned long leakSinceMs = 0; // when suspicious closed-valve flow started
 
 // ----------------- On-board OLED (Heltec V3) -----------------
 #define VEXT_PIN 36
@@ -282,6 +319,20 @@ void hexToBytes(const char* hexStr, uint8_t* out, size_t n) {
     char b[3] = { hexStr[i * 2], hexStr[i * 2 + 1], 0 };
     out[i] = (uint8_t)strtoul(b, nullptr, 16);
   }
+}
+
+// Persist the lifetime water total. Called in wear-friendly chunks (every
+// FLOW_SAVE_DELTA_L) plus once when a watering run ends, never per-tick.
+void saveWaterTotal() {
+  nvs.begin("gp", false);
+  nvs.putFloat("waterTot", waterTotalL);
+  nvs.end();
+  waterUnsavedL = 0;
+}
+void loadWaterTotal() {
+  nvs.begin("gp", true);
+  waterTotalL = nvs.getFloat("waterTot", 0);
+  nvs.end();
 }
 
 // ============================================================
@@ -454,10 +505,34 @@ void pageReadings() {
   oled.sendBuffer();
 }
 
+// Water page: live flow, the current/last run, lifetime total. The third row
+// doubles as the fault line so a dry run or leak is visible at a glance.
+void pageWater(bool online) {
+  oled.clearBuffer();
+  pageHeader("WATER", online);
+  oled.setFont(u8g2_font_6x10_tr);
+  char val[24];
+  oled.drawStr(2, 28, valveOpenedAt ? "Flow (watering)" : "Flow");
+  snprintf(val, sizeof(val), "%.1f L/min", flowLpm);
+  drawRight(126, 28, val);
+  oled.drawStr(2, 41, "Last run");
+  snprintf(val, sizeof(val), "%.1f L", waterSessionL);
+  drawRight(126, 41, val);
+  if (flowFault)          { oled.drawStr(2, 54, "NO FLOW!"); drawRight(126, 54, "check supply"); }
+  else if (leakDetected)  { oled.drawStr(2, 54, "LEAK?");    drawRight(126, 54, "valve closed"); }
+  else {
+    oled.drawStr(2, 54, "Total");
+    snprintf(val, sizeof(val), "%.1f L", waterTotalL);
+    drawRight(126, 54, val);
+  }
+  oled.sendBuffer();
+}
+
 void oledShowPage(int page, bool online) {
   switch (page) {
     case 1:  pageConnection(online); break;
     case 2:  pageReadings();         break;
+    case 3:  pageWater(online);      break;
     default: pagePairCode(online);   break;
   }
 }
@@ -548,13 +623,90 @@ void connectWiFi() {
 // open=false the close polarity, for VALVE_PULSE_MS, then releases both lines
 // (the coil holds its state with no current). Records open time for the watchdog.
 void pulseValve(bool open) {
+  // Short runs (the app default is 5s) can end BEFORE the 8s no-flow grace
+  // period, so the in-run watchdog never gets to judge them. Catch that here:
+  // a run that lasted 4s+ and moved no measurable water is a dry run too.
+  if (!open && valveOpenedAt) {
+    unsigned long ranMs = millis() - valveOpenedAt;
+    if (ranMs >= 4000 && waterSessionL < 0.05f) {
+      flowFault = true;
+      oledWake();
+      oledMessage("NO WATER FLOW", "run ended dry - check supply");
+      Serial.println("FLOW FAULT: watering run ended with no measurable water.");
+    }
+  }
   digitalWrite(VALVE_IN1, open ? HIGH : LOW);
   digitalWrite(VALVE_IN2, open ? LOW  : HIGH);
   delay(VALVE_PULSE_MS);
   digitalWrite(VALVE_IN1, LOW);
   digitalWrite(VALVE_IN2, LOW);
   valveOpenedAt = open ? millis() : 0;
+  if (open) waterSessionL = 0;   // a fresh run starts a fresh session counter
   Serial.print("Valve "); Serial.println(open ? "OPEN" : "CLOSED");
+}
+
+// ============================================================
+// Water flow bookkeeping + safety watchdogs (both modes)
+// ------------------------------------------------------------
+// Runs on ~1s windows from every wait loop. Converts the ISR's pulse count
+// into a live rate and running totals, then enforces two rules:
+//   NO-FLOW: valve commanded open but the line stays dry past the grace
+//     period -> close the valve (protects the pump / stops phantom watering)
+//     and latch flowFault until a later run actually sees water.
+//   LEAK: sustained flow while the valve is closed -> leakDetected. Clears
+//     itself when the flow stops.
+// ============================================================
+void waterTick() {
+  unsigned long now = millis();
+  if (now - lastFlowCalcMs < 1000) return;   // sub-second windows are just noise
+  noInterrupts();
+  uint32_t pulses = flowPulses;
+  flowPulses = 0;
+  interrupts();
+  float dtMin = (now - lastFlowCalcMs) / 60000.0f;
+  lastFlowCalcMs = now;
+  float liters = (pulses / FLOW_PULSES_PER_L) * FLOW_CALIBRATION;
+  flowLpm = (dtMin > 0) ? liters / dtMin : 0;
+  waterTotalL += liters;
+  waterUnsavedL += liters;
+  if (valveOpenedAt) waterSessionL += liters;
+
+  // --- no-flow watchdog ---
+  if (valveOpenedAt && (now - valveOpenedAt) > FLOW_GRACE_MS) {
+    if (flowLpm < FLOW_MIN_LPM) {
+      flowFault = true;
+      pulseValve(false);           // auto-close: nothing is coming anyway
+      oledWake();
+      oledMessage("NO WATER FLOW", "valve closed - check supply");
+      Serial.println("FLOW FAULT: valve open but line is dry; auto-closed.");
+    } else {
+      flowFault = false;           // water arrived: healthy run clears the latch
+    }
+  }
+
+  // --- leak watchdog ---
+  if (!valveOpenedAt) {
+    if (flowLpm >= LEAK_MIN_LPM) {
+      if (!leakSinceMs) leakSinceMs = now;
+      if (!leakDetected && (now - leakSinceMs) >= LEAK_CONFIRM_MS) {
+        leakDetected = true;
+        oledWake();
+        oledMessage("LEAK WARNING", "flow with valve closed");
+        Serial.println("LEAK: sustained flow while the valve is closed.");
+      }
+    } else {
+      leakSinceMs = 0;
+      leakDetected = false;
+    }
+  } else {
+    leakSinceMs = 0;
+  }
+
+  // Persist the lifetime total in chunks, plus once when a run winds down
+  // (unsaved water present and the line has gone quiet).
+  if (waterUnsavedL >= FLOW_SAVE_DELTA_L || (!valveOpenedAt && waterUnsavedL > 0 && flowLpm < 0.05f)) {
+    saveWaterTotal();
+  }
 }
 
 void handleCommand(LosantCommand *command) {
@@ -666,7 +818,7 @@ void connectLosant() {
 }
 
 void sendTelemetryWiFi() {
-  StaticJsonDocument<256> doc;
+  StaticJsonDocument<384> doc;
   JsonObject root = doc.to<JsonObject>();
   root["soilTemperatureF"] = soilTemperatureF;
   root["airTemperatureF"] = airTemperatureF;
@@ -677,6 +829,13 @@ void sendTelemetryWiFi() {
   root["batteryPct"] = batteryPct;
   root["charging"] = charging;
   root["transport"] = "wifi";   // authoritative: overrides any stale LoRaWAN tag
+  // Water metering (YF-S201). Rounded so the cloud isn't fed float dust.
+  root["flowLpm"] = roundf(flowLpm * 100) / 100.0f;
+  root["waterSessionL"] = roundf(waterSessionL * 100) / 100.0f;
+  root["waterTotalL"] = roundf(waterTotalL * 100) / 100.0f;
+  root["valveOpen"] = (valveOpenedAt != 0);
+  root["flowFault"] = flowFault;
+  root["leakDetected"] = leakDetected;
   device->sendState(root);
 }
 
@@ -738,23 +897,39 @@ bool lwJoin() {
   }
 }
 
-// Pack the 9-byte payload the TTS formatter decodes, send it, capture the link
-// signal, and dispatch any downlink (e.g. a mode switch on fPort 11).
+// Pack the 11-byte v2 payload, send it, capture the link signal, and dispatch
+// any downlink (e.g. a mode switch on fPort 11).
+//
+// v2 layout (11 bytes, fits the US915 DR0 11-byte application limit):
+//   [0-1] soilTempF*10   int16  (0x8000 = probe disconnected)
+//   [2-3] airTempF*10    int16
+//   [4]   airHumidity    uint8  (0 = DHT missing)
+//   [5]   soilMoisture % uint8  (0xFF = probe disconnected; replaces v1's raw ADC)
+//   [6]   batteryPct     uint8  (0xFF = on AC/USB)
+//   [7]   flow L/min * 4 uint8  (0.25 L/min steps, caps at 63.75)
+//   [8-9] total liters*2 uint16 (0.5 L steps; wraps at ~32,767 L)
+//   [10]  status bits: b0 valveOpen, b1 flowFault, b2 leakDetected
+// The decoder (netlify/functions/lorawan-uplink.js) handles both this and the
+// legacy 9-byte v1 layout by length, so mixed firmware fleets keep working.
 void lwSendReading() {
   int16_t soilT10 = (soilTemperatureF > -100) ? (int16_t)lround(soilTemperatureF * 10) : (int16_t)0x8000;
   int16_t airT10  = (!isnan(airTemperatureF)) ? (int16_t)lround(airTemperatureF * 10) : 0;
   uint8_t hum     = (!isnan(airHumidity) && airHumidity > 0) ? (uint8_t)constrain((int)lround(airHumidity), 0, 100) : 0;
-  uint16_t raw    = (uint16_t)constrain(soilRaw, 0, 4095);
-  uint8_t moist   = (uint8_t)constrain(soilMoisturePercent, 0, 100);
+  uint8_t moist   = (soilRaw > 300) ? (uint8_t)constrain(soilMoisturePercent, 0, 100) : 0xFF;
   uint8_t flags   = (batteryPct >= 0 ? (uint8_t)constrain(batteryPct, 0, 100) : 0xFF);
+  uint8_t flow4   = (uint8_t)constrain((long)lround(flowLpm * 4), 0L, 255L);
+  uint16_t totHalfL = (uint16_t)((uint32_t)lround(waterTotalL * 2) & 0xFFFF);
+  uint8_t status  = (valveOpenedAt ? 0x01 : 0) | (flowFault ? 0x02 : 0) | (leakDetected ? 0x04 : 0);
 
-  uint8_t payload[9] = {
+  uint8_t payload[11] = {
     (uint8_t)(soilT10 >> 8), (uint8_t)(soilT10 & 0xFF),
     (uint8_t)(airT10  >> 8), (uint8_t)(airT10  & 0xFF),
     hum,
-    (uint8_t)(raw >> 8), (uint8_t)(raw & 0xFF),
     moist,
     flags,
+    flow4,
+    (uint8_t)(totHalfL >> 8), (uint8_t)(totHalfL & 0xFF),
+    status,
   };
 
   uint8_t dlBuf[64]; size_t dlLen = sizeof(dlBuf);
@@ -838,6 +1013,12 @@ void setup() {
   pinMode(RESET_BTN, INPUT_PULLUP);
   pinMode(VALVE_IN1, OUTPUT); digitalWrite(VALVE_IN1, LOW);
   pinMode(VALVE_IN2, OUTPUT); digitalWrite(VALVE_IN2, LOW);
+  // Flow sensor: plain INPUT — the external divider's 20k lower leg defines
+  // the idle level, so no internal pull fights it.
+  pinMode(FLOW_PIN, INPUT);
+  attachInterrupt(digitalPinToInterrupt(FLOW_PIN), flowIsr, FALLING);
+  loadWaterTotal();
+  lastFlowCalcMs = millis();
   delay(1000);
 
   bool wokeFromSleep = (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT1);
@@ -911,6 +1092,7 @@ void loopWiFi() {
   unsigned long waitStart = millis();
   while (millis() - waitStart < 3000) {
     handleButton();
+    waterTick();   // keeps the no-flow/leak watchdogs responsive mid-wait
     updateScreenPower();
     if (millis() - lastPageSwitch >= PAGE_MS) {
       lastPageSwitch = millis();
@@ -931,6 +1113,7 @@ void loopLoRaWAN() {
   while (millis() - waitStart < LORA_UPLINK_MS) {
     esp_task_wdt_reset();
     handleButton();
+    waterTick();   // water totals + leak watchdog keep running between uplinks
     updateScreenPower();
     if (millis() - lastPageSwitch >= PAGE_MS) {
       lastPageSwitch = millis();
@@ -943,6 +1126,7 @@ void loopLoRaWAN() {
 
 void loop() {
   esp_task_wdt_reset();
+  waterTick();
   // Timed-run + safety watchdog: closes the valve when the requested duration
   // (or the default limit) elapses, so a lost "close" command can't flood anything.
   if (valveOpenedAt && (millis() - valveOpenedAt) > valveOpenLimitMs) {

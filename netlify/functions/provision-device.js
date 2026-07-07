@@ -33,6 +33,14 @@ const ATTRS = [
   { name: 'loraRssi', dataType: 'number' },
   { name: 'loraSnr', dataType: 'number' },
   { name: 'transport', dataType: 'string' },
+  // Water meter (YF-S201, firmware 5.1+). Devices provisioned before these
+  // existed can be backfilled with scripts/add-water-attributes.mjs.
+  { name: 'flowLpm', dataType: 'number' },
+  { name: 'waterSessionL', dataType: 'number' },
+  { name: 'waterTotalL', dataType: 'number' },
+  { name: 'valveOpen', dataType: 'boolean' },
+  { name: 'flowFault', dataType: 'boolean' },
+  { name: 'leakDetected', dataType: 'boolean' },
 ];
 
 export const handler = async (event) => {

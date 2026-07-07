@@ -10,7 +10,8 @@ export default function IrrigationCard() {
   const { selectedDevice, setIrrigation, runPump } = useApp();
   const irr = selectedDevice.irrigation || { mode: 'manual', targetMoisture: 35, durationSec: 5, enabled: false };
   const running = selectedDevice.pumpRunning;
-  const moisture = selectedDevice.reading.soilMoisturePercent;
+  const reading = selectedDevice.reading;
+  const moisture = reading.soilMoisturePercent;
   const paused = irr.pausedUntil && irr.pausedUntil > Date.now();
   const hasLocation = !!selectedDevice.geo;
   const rainDelayOn = !!irr.rainDelay && hasLocation;
@@ -76,6 +77,19 @@ export default function IrrigationCard() {
         <button className="btn btn--blue" style={{ marginTop: 14 }} disabled={running} onClick={() => runPump(selectedDevice.id, irr.durationSec)}>
           <Droplet size={16} style={{ verticalAlign: '-3px', marginRight: 6 }} />{running ? 'Watering...' : 'Water now'}
         </button>
+
+        {/* Live confirmation from the flow sensor: water is actually moving
+            (or pointedly isn't) while a run is active. */}
+        {running && reading.flowLpm != null && (
+          <p className="muted" style={{ margin: '10px 2px 0', fontWeight: 600, color: reading.flowLpm > 0 ? 'var(--green-d, #1a9b5a)' : '#f4a52b' }}>
+            {reading.flowLpm > 0 ? `Flowing ${reading.flowLpm.toFixed(1)} L/min` : 'Waiting for water to move...'}
+          </p>
+        )}
+        {!running && reading.flowFault && (
+          <p className="muted" style={{ margin: '10px 2px 0', fontWeight: 600, color: '#ef4444' }}>
+            Last run saw no water — valve was closed for safety. Check the supply.
+          </p>
+        )}
       </div>
 
       {/* Rain delay: skip watering when rain is forecast. Needs the plant's

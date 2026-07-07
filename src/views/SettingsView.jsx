@@ -63,6 +63,44 @@ export default function SettingsView() {
         />
       </div>
 
+      <div className="section-title">Water</div>
+      <div className="card">
+        <div className="field__row"><div className="field__label">Volume units</div></div>
+        <Pills
+          options={[{ value: 'gal', label: 'Gallons' }, { value: 'L', label: 'Liters' }]}
+          value={settings.waterUnit || 'gal'}
+          onChange={(v) => {
+            // Convert the saved rate so "per 1,000 units" keeps meaning the
+            // same money when the unit flips (1 gal = 3.78541 L).
+            const cur = settings.waterUnit || 'gal';
+            if (v === cur) return;
+            const rate = Number(settings.waterPricePerK) || 0;
+            const next = v === 'L' ? rate / 3.78541 : rate * 3.78541;
+            updateSettings({ waterUnit: v, waterPricePerK: Math.round(next * 100) / 100 });
+          }}
+          blue
+        />
+        <div className="field__row" style={{ marginTop: 16 }}>
+          <div>
+            <div className="field__label">Water price</div>
+            <div className="muted">$ per 1,000 {settings.waterUnit === 'L' ? 'liters' : 'gallons'}. It's on your utility bill</div>
+          </div>
+        </div>
+        <input
+          className="input"
+          type="number"
+          min="0"
+          step="0.01"
+          value={settings.waterPricePerK ?? ''}
+          onChange={(e) => updateSettings({ waterPricePerK: e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)) })}
+          style={{ marginTop: 6, marginBottom: 0 }}
+        />
+        <p className="muted" style={{ fontSize: 12.5, margin: '10px 2px 0' }}>
+          Used for the daily / weekly / monthly cost figures on the Water card. Nodes without a
+          flow sensor simply don't show the card.
+        </p>
+      </div>
+
       <div className="section-title">Data</div>
 
       <div className="card">

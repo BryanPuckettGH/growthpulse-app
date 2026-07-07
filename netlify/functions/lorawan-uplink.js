@@ -18,13 +18,28 @@
 // node; productionize this with a lookup table or a Supabase row keyed by
 // dev_eui. Set LORAWAN_DEVICE_MAP as JSON like
 //   {"growthpulse-node-01":"6a1fb486df527c8bf8d3324b"}
-// Decode the 9-byte uplink the firmware packs in lwSendReading():
+// Decode the raw uplink bytes the firmware packs in lwSendReading().
+// Two layouts, distinguished by length (mixed firmware fleets keep working):
+//
+// v1 - 9 bytes (firmware <= 5.0):
 //   [0..1] soilTemperatureF * 10, int16 BE  (0x8000 = sensor absent)
 //   [2..3] airTemperatureF  * 10, int16 BE
 //   [4]    airHumidity %,           uint8
 //   [5..6] soilRaw (0-4095),        uint16 BE
 //   [7]    soilMoisturePercent,     uint8
 //   [8]    batteryPct (0-100),      uint8   (0xFF = unknown)
+//
+// v2 - 11 bytes (firmware 5.1+, adds the YF-S201 water meter; soilRaw is
+// dropped to stay inside the US915 DR0 11-byte limit, moisture 0xFF now
+// means "probe disconnected"):
+//   [0..1] soilTemperatureF * 10, int16 BE  (0x8000 = sensor absent)
+//   [2..3] airTemperatureF  * 10, int16 BE
+//   [4]    airHumidity %,           uint8
+//   [5]    soilMoisturePercent,     uint8   (0xFF = probe disconnected)
+//   [6]    batteryPct (0-100),      uint8   (0xFF = on AC/USB)
+//   [7]    flow L/min * 4,          uint8
+//   [8..9] total liters * 2,        uint16 BE (wraps at ~32,767 L)
+//   [10]   status bits: b0 valveOpen, b1 flowFault, b2 leakDetected
 function decodeFrmPayload(b64) {
   if (!b64 || typeof b64 !== 'string') return null;
   let buf;
@@ -32,10 +47,29 @@ function decodeFrmPayload(b64) {
   if (buf.length < 9) return null;
   const s16 = (hi, lo) => { let v = (hi << 8) | lo; if (v & 0x8000) v -= 0x10000; return v; };
   const soilWord = (buf[0] << 8) | buf[1];
-  return {
+  const common = {
     soilTemperatureF: soilWord === 0x8000 ? null : s16(buf[0], buf[1]) / 10,
     airTemperatureF: s16(buf[2], buf[3]) / 10,
     airHumidity: buf[4],
+  };
+  if (buf.length >= 11) {
+    const moist = buf[5];
+    return {
+      ...common,
+      soilMoisturePercent: moist === 0xFF ? null : moist,
+      // v2 carries no raw ADC; synthesize the disconnected sentinel (raw < 300)
+      // so the app's probe-detection logic keeps working unchanged.
+      soilRaw: moist === 0xFF ? 0 : null,
+      batteryPct: buf[6] === 0xFF ? null : buf[6],
+      flowLpm: buf[7] / 4,
+      waterTotalL: ((buf[8] << 8) | buf[9]) / 2,
+      valveOpen: !!(buf[10] & 0x01),
+      flowFault: !!(buf[10] & 0x02),
+      leakDetected: !!(buf[10] & 0x04),
+    };
+  }
+  return {
+    ...common,
     soilRaw: (buf[5] << 8) | buf[6],
     soilMoisturePercent: buf[7],
     batteryPct: buf[8] === 0xFF ? null : buf[8],
@@ -111,6 +145,7 @@ export const handler = async (event) => {
   const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
   let soilTemperatureF = num(decoded.soilTemperatureF);
   if (soilTemperatureF != null && soilTemperatureF < -100) soilTemperatureF = null;
+  const bool = (v) => (typeof v === 'boolean' ? v : null);
   const rawState = {
     soilTemperatureF,
     airTemperatureF: num(decoded.airTemperatureF),
@@ -118,6 +153,12 @@ export const handler = async (event) => {
     soilRaw: num(decoded.soilRaw),
     soilMoisturePercent: num(decoded.soilMoisturePercent),
     batteryPct: num(decoded.batteryPct),
+    // Water meter (v2 payloads only; v1 nodes simply don't report these).
+    flowLpm: num(decoded.flowLpm),
+    waterTotalL: num(decoded.waterTotalL),
+    valveOpen: bool(decoded.valveOpen),
+    flowFault: bool(decoded.flowFault),
+    leakDetected: bool(decoded.leakDetected),
     // Tag the link so the app can show LoRaWAN + signal honestly.
     transport: 'lorawan',
     loraRssi: up.rx_metadata && up.rx_metadata[0] ? num(up.rx_metadata[0].rssi) : null,

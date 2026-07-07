@@ -10,6 +10,7 @@ import WeatherCard from '../components/WeatherCard';
 import PlantPicker from '../components/PlantPicker';
 import GrowthJournal from '../components/GrowthJournal';
 import IrrigationCard from '../components/IrrigationCard';
+import WaterCard from '../components/WaterCard';
 import { AlertTriangle, Info, CheckCircle2, TrendingUp, TrendingDown, Minus, ChevronRight, CloudRain, Sparkles, Droplet, WifiOff } from 'lucide-react';
 
 const HERO = ['airTemperatureF', 'airHumidity', 'soilMoisturePercent'];
@@ -177,6 +178,8 @@ export default function LiveView() {
       {tier.weather ? <WeatherCard /> : <LockedWeather onUpgrade={openPlans} />}
 
       {tier.irrigation ? <IrrigationCard /> : <LockedIrrigation onUpgrade={openPlans} />}
+
+      {tier.irrigation && <WaterCard />}
 
       <div className="section-title">Sensors</div>
       <div className="chips">

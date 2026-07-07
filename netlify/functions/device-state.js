@@ -42,6 +42,13 @@ export const handler = async (event) => {
       loraRssi: num('loraRssi'),
       loraSnr: num('loraSnr'),
       transport: str('transport'),
+      // Water meter (YF-S201, firmware 5.1+). Older nodes just report nulls.
+      flowLpm: num('flowLpm'),
+      waterSessionL: num('waterSessionL'),
+      waterTotalL: num('waterTotalL'),
+      valveOpen: bool('valveOpen'),
+      flowFault: bool('flowFault'),
+      leakDetected: bool('leakDetected'),
       time: s.soilMoisturePercent ? new Date(s.soilMoisturePercent.time).getTime() : Date.now(),
     };
     return {

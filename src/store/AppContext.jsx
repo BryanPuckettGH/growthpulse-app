@@ -59,6 +59,14 @@ function buildDevice(d) {
     } else {
       r.wifiRssi = -50 - Math.round(Math.random() * 25); // ~ -50..-75 dBm
     }
+    // Water meter looks lived-in on demo units; it accumulates while the
+    // simulated pump runs (see the live tick below).
+    r.flowLpm = 0;
+    r.waterSessionL = 0;
+    r.waterTotalL = +(90 + Math.random() * 120).toFixed(1);
+    r.valveOpen = false;
+    r.flowFault = false;
+    r.leakDetected = false;
   }
   return {
     ...d,
@@ -79,7 +87,19 @@ const DEFAULT_ALARMS = [
   { id: 'a1', metric: 'soilMoisturePercent', op: 'below', value: 25, enabled: true, deviceId: 'all' },
   { id: 'a2', metric: 'airTemperatureF', op: 'above', value: 85, enabled: true, deviceId: 'all' },
   { id: 'a3', metric: 'airHumidity', op: 'below', value: 30, enabled: false, deviceId: 'all' },
+  // On by default: watering that moves no water is exactly what the owner
+  // must hear about (empty reservoir, kinked line, dead pump).
+  { id: 'a4', metric: 'flowFault', op: 'above', value: 0, enabled: true, deviceId: 'all' },
+  { id: 'a5', metric: 'leakDetected', op: 'above', value: 0, enabled: true, deviceId: 'all' },
 ];
+
+// Settings defaults, merged over whatever an older install saved so new keys
+// (like the water price) appear without wiping existing choices.
+const DEFAULT_SETTINGS = {
+  units: 'F', refreshMs: 2000, theme: 'auto',
+  waterUnit: 'gal',       // 'gal' or 'L' for all water volumes in the app
+  waterPricePerK: 8.00,   // $ per 1,000 of waterUnit, as utility bills quote it
+};
 
 // Map a Supabase devices row into the app's device shape.
 function rowToDevice(r) {
@@ -124,7 +144,7 @@ export function AppProvider({ children }) {
   );
   const [selectedDeviceId, setSelectedDeviceId] = useState(() => load('selectedDeviceId', null));
   const [alarmRules, setAlarmRules] = useState(() => load('alarmRules', DEFAULT_ALARMS));
-  const [settings, setSettings] = useState(() => load('settings', { units: 'F', refreshMs: 2000, theme: 'auto' }));
+  const [settings, setSettings] = useState(() => ({ ...DEFAULT_SETTINGS, ...load('settings', {}) }));
   const [tierId, setTierId] = useState(() => {
     if (isDemo) return 'pro';
     // The account is the source of truth so the plan follows the user to any
@@ -262,6 +282,18 @@ export function AppProvider({ children }) {
           ['wifiRssi', 'loraRssi', 'loraSnr', 'transport'].forEach((k) => {
             if (d.reading[k] != null) r[k] = d.reading[k];
           });
+          // Demo water meter: flows ~2 L/min while the simulated pump runs,
+          // accumulating into the session + lifetime totals like real firmware.
+          const running = !!d.pumpRunning;
+          const dtMin = settings.refreshMs / 60000;
+          const flowLpm = running ? +(1.8 + Math.random() * 0.6).toFixed(2) : 0;
+          const litersTick = flowLpm * dtMin;
+          r.flowLpm = flowLpm;
+          r.waterSessionL = running ? +(((d.reading.waterSessionL || 0) + litersTick)).toFixed(2) : (d.reading.waterSessionL || 0);
+          r.waterTotalL = +(((d.reading.waterTotalL || 0) + litersTick)).toFixed(2);
+          r.valveOpen = running;
+          r.flowFault = !!d.reading.flowFault;
+          r.leakDetected = !!d.reading.leakDetected;
           return { ...d, reading: r, history: [...d.history, r].slice(-60), lastSeen: r.time };
         })
       );
@@ -502,8 +534,9 @@ export function AppProvider({ children }) {
   const runPump = useCallback((id, seconds = 5) => {
     const dur = Math.max(1, Math.min(Number(seconds) || 5, 30));
     const d = devicesRef.current.find((x) => x.id === id);
-    // Optimistic UI: show it running right away.
-    setDevices((ds) => ds.map((x) => (x.id === id ? { ...x, pumpRunning: true } : x)));
+    // Optimistic UI: show it running right away. A fresh run starts a fresh
+    // session counter (mirrors the firmware's pulseValve behavior).
+    setDevices((ds) => ds.map((x) => (x.id === id ? { ...x, pumpRunning: true, reading: { ...x.reading, waterSessionL: 0 } } : x)));
 
     // Demo devices (or anything without a real cloud id) just simulate the effect;
     // the real sensor reports the moisture change on a live node.
