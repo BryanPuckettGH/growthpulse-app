@@ -256,7 +256,10 @@ export function AppProvider({ children }) {
           if (d.losantDeviceId) {
             // Freshness window: a Wi-Fi node reports every few seconds, so 45s
             // of silence means it's offline. LoRaWAN reports in minutes.
-            const STALE_MS = d.transport === 'lorawan' ? 15 * 60 * 1000 : 45 * 1000;
+            // Wi-Fi nodes now publish every 2 minutes (TELEMETRY_INTERVAL_MS in the
+            // firmware) to stay inside the Losant payload budget, so a 45s window
+            // would flag every healthy node as offline. Allow a couple of missed reports.
+            const STALE_MS = d.transport === 'lorawan' ? 15 * 60 * 1000 : 5 * 60 * 1000;
             const u = updates[d.id];
             if (!u) {
               // Fetch failed or no data; re-evaluate freshness of what we have.

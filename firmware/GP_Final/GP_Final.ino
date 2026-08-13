@@ -107,7 +107,7 @@
 #define SX_MISO  11
 #define SX_MOSI  10
 
-#define FW_VERSION "5.1"
+#define FW_VERSION "5.2"
 #define WDT_TIMEOUT_S 60
 #define DIM_AFTER_MS (5UL * 60UL * 1000UL)
 #define SELFTEST_HOLD_MS 10000
@@ -121,6 +121,13 @@
 // reach a class-A node right after it uplinks). For production on TTN, raise this
 // toward ~15 min to stay within the fair-use airtime policy.
 #define LORA_UPLINK_MS (60UL * 1000UL)
+
+// Wi-Fi telemetry cadence. The main loop runs about every 4 seconds, and
+// publishing on every loop costs ~21,600 Losant payloads per day per board,
+// which is what blew through the 100k/month Sandbox limit. Publish every 2
+// minutes instead (~720/day/board). Valve events force an immediate publish
+// (see telemetryDue), so watering still shows up in the app instantly.
+#define TELEMETRY_INTERVAL_MS (120UL * 1000UL)
 
 #define PAGE_MS 5000
 #define PAGE_COUNT 4
@@ -148,6 +155,10 @@ unsigned long losantConnectedAt = 0;
 const unsigned long CMD_GRACE_MS = 12000;
 // Irrigation valve: 0 = closed; otherwise millis() when opened (for the auto-close watchdog).
 unsigned long valveOpenedAt = 0;
+// Wi-Fi telemetry pacing (see TELEMETRY_INTERVAL_MS). telemetryDue lets an
+// important event (valve open/close) publish immediately instead of waiting.
+unsigned long lastTelemetryAt = 0;
+bool telemetryDue = true;
 // How long the current run may last. Defaults to VALVE_MAX_OPEN_MS; a setValve
 // command with durationSeconds (e.g., "Hey Google, run for 10 seconds") overrides it.
 unsigned long valveOpenLimitMs = VALVE_MAX_OPEN_MS;
@@ -642,6 +653,7 @@ void pulseValve(bool open) {
   digitalWrite(VALVE_IN2, LOW);
   valveOpenedAt = open ? millis() : 0;
   if (open) waterSessionL = 0;   // a fresh run starts a fresh session counter
+  telemetryDue = true;           // report the valve state + session volume right away
   Serial.print("Valve "); Serial.println(open ? "OPEN" : "CLOSED");
 }
 
@@ -1085,7 +1097,13 @@ void loopWiFi() {
   if (WiFi.status() != WL_CONNECTED) connectWiFi();
   if (!device->connected()) connectLosant();
   readSensors();
-  sendTelemetryWiFi();
+  // Publish on a fixed cadence rather than every loop, to stay inside the
+  // Losant payload budget. telemetryDue jumps the queue for valve events.
+  if (telemetryDue || (millis() - lastTelemetryAt) >= TELEMETRY_INTERVAL_MS) {
+    sendTelemetryWiFi();
+    lastTelemetryAt = millis();
+    telemetryDue = false;
+  }
   device->loop();
   bool online = WiFi.status() == WL_CONNECTED && device->connected();
   oledShowPage(screenPage, online);
