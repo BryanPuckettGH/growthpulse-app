@@ -6,6 +6,10 @@ All notable changes to GrowthPulse, the web app and the device firmware.
 
 ## Web App
 
+### v2.25.0 - August 12, 2026
+- The project video playlist is now embedded on The Project page: seven videos spanning the first concept pitch, the bench demos, and the final senior design presentation. Player is served from `youtube-nocookie.com` and lazy-loaded so it costs nothing until scrolled to, with a link out to the full playlist and a "Watch the build" button in the page header.
+- The welcome overlay now opens on every load of the public site rather than once per browser session. It is the introduction to the project, so a refresh or a return visit should show it again; navigating between pages within the site still leaves it closed once dismissed.
+
 ### v2.24.0 - August 12, 2026
 - The public site now introduces itself to the people who actually arrive on it. growthpulsecloud.com is linked from a resume, so a large share of first-time visitors are recruiters and engineers rather than customers, and the marketing copy alone never told them who built this or when. A welcome overlay (`WelcomeModal.jsx`) opens on arrival with a short note from the team lead, full Team 15 credits with each member's contribution, and two ways forward: browse the product site, or jump to the engineering write-up. Dismissal is remembered per browser session in `sessionStorage`, so moving between pages does not reopen it but a fresh visit does. It can be reopened any time from the footer.
 - New "The Project" page (`ProjectPage.jsx`), a sixth entry in the marketing nav: the build by the numbers, the system layer by layer, a timeline, per-person attribution, and the six debugging problems worth talking about (the NE555 browning out on the 3.3V rail, the GPIO1 conflict with onboard battery sense, fitting flow and status into the 11-byte US915 DR0 payload, provisioning that minted orphan DevEUIs, Losant rejecting an entire state report over one undefined attribute, and `resets_join_nonces` being written to the Network Server instead of the Join Server).

@@ -23,26 +23,18 @@ const PAGES = [
   { id: 'project', label: 'The Project' },
 ];
 
-// The welcome overlay greets each new browser session once. Dismissing it sets
-// this key so navigating around the site doesn't bring it back, but a fresh
-// visit tomorrow shows it again.
-const WELCOME_KEY = 'gp.welcomeSeen';
-const welcomeDismissed = () => {
-  try { return sessionStorage.getItem(WELCOME_KEY) === '1'; } catch { return false; }
-};
-
 export default function Landing() {
   const { startDemo } = useAuth();
   const [auth, setAuth] = useState(null);   // null | 'login' | 'signup'
   const [page, setPage] = useState('home');
-  const [welcome, setWelcome] = useState(() => !welcomeDismissed());
+  // The welcome overlay opens on every load of the public site, deliberately.
+  // This is the introduction to the project, so a reload or a return visit
+  // should show it again; only in-page navigation leaves it closed.
+  const [welcome, setWelcome] = useState(true);
 
   useEffect(() => { window.scrollTo(0, 0); }, [page]);
 
-  const closeWelcome = () => {
-    try { sessionStorage.setItem(WELCOME_KEY, '1'); } catch { /* private mode */ }
-    setWelcome(false);
-  };
+  const closeWelcome = () => setWelcome(false);
 
   if (auth) return <Login initialMode={auth} onBack={() => setAuth(null)} />;
 

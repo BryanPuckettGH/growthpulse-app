@@ -1,8 +1,13 @@
 import { TEAM, GITHUB_URL } from './WelcomeModal';
 import {
   Github, ExternalLink, Cpu, RadioTower, Server, Database, Smartphone,
-  Layers, Wrench, Bug, Users, Calendar,
+  Layers, Wrench, Bug, Users, Calendar, PlayCircle,
 } from 'lucide-react';
+
+// Seven videos, concept pitch through bench demos to the final senior design
+// presentation. Unlisted, so it is reachable by link and embed but not by search.
+const PLAYLIST_ID = 'PLfSq7QVxHNdg';
+const PLAYLIST_URL = `https://www.youtube.com/playlist?list=${PLAYLIST_ID}`;
 
 /* The engineering write-up behind the product site.
 
@@ -83,6 +88,9 @@ export default function ProjectPage({ demo }) {
           <a className="lbtn lbtn--primary lbtn--small" href={GITHUB_URL} target="_blank" rel="noreferrer">
             <Github size={16} style={{ marginRight: 8 }} /> Source on GitHub
           </a>
+          <a className="lbtn lbtn--ghost lbtn--small" href={PLAYLIST_URL} target="_blank" rel="noreferrer">
+            <PlayCircle size={16} style={{ marginRight: 8 }} /> Watch the build
+          </a>
           <a className="lbtn lbtn--ghost lbtn--small" href="https://growthpulsecloud.com" target="_blank" rel="noreferrer">
             <ExternalLink size={15} style={{ marginRight: 8 }} /> Live deployment
           </a>
@@ -97,6 +105,30 @@ export default function ProjectPage({ demo }) {
       <p className="proj__numnote muted">
         Figures come from the production repository's git history and changelog, not from an estimate.
       </p>
+
+      <section className="landing__section">
+        <div className="proj__sectionhead">
+          <PlayCircle size={20} color="#ef4444" />
+          <h2 style={{ margin: 0 }}>Watch it get built</h2>
+        </div>
+        <p className="proj__subhead">
+          Seven videos recorded across the project, from the first concept pitch through bench demos
+          of the hardware to the final senior design presentation. If you only have a few minutes,
+          this is the fastest way to see the thing actually working.
+        </p>
+        <div className="proj__video">
+          <iframe
+            src={`https://www.youtube-nocookie.com/embed/videoseries?list=${PLAYLIST_ID}`}
+            title="GrowthPulse project videos"
+            loading="lazy"
+            allow="accelerometer; encrypted-media; gyroscope; picture-in-picture; fullscreen"
+            allowFullScreen
+          />
+        </div>
+        <a className="proj__videolink" href={PLAYLIST_URL} target="_blank" rel="noreferrer">
+          <PlayCircle size={15} /> Open the full playlist on YouTube
+        </a>
+      </section>
 
       <section className="landing__section">
         <h2>The system, layer by layer</h2>
