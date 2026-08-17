@@ -776,6 +776,16 @@ select.input { appearance: none; -webkit-appearance: none; }
 }
 .welcome__signname { font-size: 16px; font-weight: 800; letter-spacing: -0.3px; line-height: 1.2; }
 .welcome__signrole { font-size: 12.5px; color: var(--ink-3); margin-top: 2px; font-weight: 600; }
+.welcome__li {
+  display: inline-flex; align-items: center; gap: 5px; margin-top: 6px;
+  font-size: 12px; font-weight: 700; color: #0a66c2; text-decoration: none;
+}
+.welcome__li:hover { text-decoration: underline; }
+.proj__lilink {
+  display: inline-flex; align-items: center; gap: 5px;
+  color: #0a66c2; text-decoration: none; font-weight: 700;
+}
+.proj__lilink:hover { text-decoration: underline; }
 
 /* --- body: note on the left, credits on the right --- */
 .welcome__body {

@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { X, Github, ArrowRight, Cpu } from 'lucide-react';
+import { X, Github, ArrowRight, Cpu, Linkedin } from 'lucide-react';
 
 /* Visitor welcome overlay for the public site.
 
@@ -29,6 +29,10 @@ export const TEAM = [
 ];
 
 export const GITHUB_URL = 'https://github.com/BryanPuckettGH/growthpulse-app';
+
+// Left empty the link simply does not render, so an unset value can never ship a
+// dead link to a recruiter. Both the overlay and the project page read this.
+export const LINKEDIN_URL = 'https://www.linkedin.com/in/bryan-puckett/';
 
 export default function WelcomeModal({ onClose, onSeeProject }) {
   // Esc closes, and the page behind shouldn't scroll while the overlay is up.
@@ -62,6 +66,11 @@ export default function WelcomeModal({ onClose, onSeeProject }) {
             <div className="welcome__eyebrow">A message from the team lead</div>
             <div className="welcome__signname">Bryan Puckett</div>
             <div className="welcome__signrole">Team Lead · Team 15 · Florida International University</div>
+            {LINKEDIN_URL && (
+              <a className="welcome__li" href={LINKEDIN_URL} target="_blank" rel="noreferrer">
+                <Linkedin size={13} /> Connect on LinkedIn
+              </a>
+            )}
           </div>
         </div>
 

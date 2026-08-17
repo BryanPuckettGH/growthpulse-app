@@ -6,6 +6,9 @@ All notable changes to GrowthPulse, the web app and the device firmware.
 
 ## Web App
 
+### v2.26.0 - August 12, 2026
+- LinkedIn is now reachable from the public site, which previously offered a visitor no way at all to make contact. The link sits under the signature in the welcome overlay, in The Project page header next to GitHub, and beside the commit-authorship line in the attribution section. All three read one `LINKEDIN_URL` constant in `WelcomeModal.jsx` and render nothing when it is empty, so the profile can never ship as a dead link.
+
 ### v2.25.0 - August 12, 2026
 - The project video playlist is now embedded on The Project page: seven videos spanning the first concept pitch, the bench demos, and the final senior design presentation. Player is served from `youtube-nocookie.com` and lazy-loaded so it costs nothing until scrolled to, with a link out to the full playlist and a "Watch the build" button in the page header.
 - The welcome overlay now opens on every load of the public site rather than once per browser session. It is the introduction to the project, so a refresh or a return visit should show it again; navigating between pages within the site still leaves it closed once dismissed.

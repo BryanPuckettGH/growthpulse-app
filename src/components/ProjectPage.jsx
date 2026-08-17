@@ -1,7 +1,7 @@
-import { TEAM, GITHUB_URL } from './WelcomeModal';
+import { TEAM, GITHUB_URL, LINKEDIN_URL } from './WelcomeModal';
 import {
   Github, ExternalLink, Cpu, RadioTower, Server, Database, Smartphone,
-  Layers, Wrench, Bug, Users, Calendar, PlayCircle,
+  Layers, Wrench, Bug, Users, Calendar, PlayCircle, Linkedin,
 } from 'lucide-react';
 
 // Seven videos, concept pitch through bench demos to the final senior design
@@ -94,6 +94,11 @@ export default function ProjectPage({ demo }) {
           <a className="lbtn lbtn--ghost lbtn--small" href="https://growthpulsecloud.com" target="_blank" rel="noreferrer">
             <ExternalLink size={15} style={{ marginRight: 8 }} /> Live deployment
           </a>
+          {LINKEDIN_URL && (
+            <a className="lbtn lbtn--ghost lbtn--small" href={LINKEDIN_URL} target="_blank" rel="noreferrer">
+              <Linkedin size={15} style={{ marginRight: 8 }} /> Connect on LinkedIn
+            </a>
+          )}
         </div>
       </header>
 
@@ -206,6 +211,14 @@ export default function ProjectPage({ demo }) {
               {m.lead && (
                 <div className="proj__leadnote">
                   All 72 commits in the production repository are authored by this account.
+                  {LINKEDIN_URL && (
+                    <>
+                      {' '}
+                      <a className="proj__lilink" href={LINKEDIN_URL} target="_blank" rel="noreferrer">
+                        <Linkedin size={13} /> LinkedIn
+                      </a>
+                    </>
+                  )}
                 </div>
               )}
             </div>
